@@ -8,10 +8,5 @@ const ui = useUiStore();
 
 <template>
   <PagePlaceholder title="Das ist page Spiel">
-    <RouterLink to="/patch-notes" class="underline">Patch Notes</RouterLink>
-    <RouterLink to="/login" class="underline">Login</RouterLink>
-    <button type="button" class="underline" @click="ui.openSettings">
-      Einstellungen
-    </button>
   </PagePlaceholder>
 </template>

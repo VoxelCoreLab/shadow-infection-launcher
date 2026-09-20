@@ -1,38 +1,36 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from "vue-router";
-import { useUiStore } from "@/stores/ui";
+import { computed } from "vue";
+import { RouterView, useRoute } from "vue-router";
+import AppShell from "@/layouts/AppShell.vue";
+import Header from "@/components/Header.vue";
+import mainBg from "@/assets/main-bg-mountain-lake.png";
+import patchNotesBg from "@/assets/patch-notes-bg-twilight-lake.png";
 
-const ui = useUiStore();
+const route = useRoute();
+const isPatchNotes = computed(() => route.name === "patch-notes");
+const backgroundSrc = computed(() => (isPatchNotes.value ? patchNotesBg : mainBg));
+const backgroundPosition = computed(() =>
+  isPatchNotes.value ? "center 45%" : "center 40%",
+);
 </script>
 
 <template>
-  <div class="min-h-screen bg-zinc-100 text-zinc-900">
-    <header class="flex items-center justify-between border-b border-zinc-300 bg-white px-6 py-3">
-      <nav class="flex gap-4 text-sm font-medium">
-        <RouterLink
-          to="/spiel"
-          class="hover:underline"
-          active-class="underline"
-        >
-          Spiel
-        </RouterLink>
-        <RouterLink
-          to="/patch-notes"
-          class="hover:underline"
-          active-class="underline"
-        >
-          Patch Notes
-        </RouterLink>
-      </nav>
-      <div class="flex items-center gap-4 text-sm">
-        <button type="button" class="hover:underline" @click="ui.openSettings">
-          Einstellungen
-        </button>
-        <RouterLink to="/login" class="hover:underline">Login</RouterLink>
+  <AppShell>
+    <template #header>
+      <Header />
+    </template>
+    <div class="relative h-full">
+      <div class="absolute inset-0 overflow-hidden" aria-hidden="true">
+        <img
+          :src="backgroundSrc"
+          alt=""
+          class="h-full w-full object-cover"
+          :style="{ objectPosition: backgroundPosition }"
+        />
       </div>
-    </header>
-    <main class="p-6">
-      <RouterView />
-    </main>
-  </div>
+      <main class="relative z-10 h-full p-6">
+        <RouterView />
+      </main>
+    </div>
+  </AppShell>
 </template>
