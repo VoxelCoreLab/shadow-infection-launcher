@@ -10,7 +10,9 @@ const ui = useUiStore();
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     @click.self="ui.closeSettings"
   >
-    <div class="w-full max-w-md space-y-4 rounded-lg bg-white p-6 text-zinc-900 shadow-xl">
+    <div
+      class="w-full max-w-md space-y-4 rounded-lg bg-white p-6 text-zinc-900 shadow-xl"
+    >
       <h2 class="text-xl font-semibold">This is the Settings page</h2>
       <button
         type="button"

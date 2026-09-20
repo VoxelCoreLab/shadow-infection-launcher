@@ -16,7 +16,11 @@ const ui = useUiStore();
   >
     <div class="flex items-center gap-6">
       <div class="flex select-none items-center gap-2" data-tauri-drag-region>
-        <img :src="appIcon" alt="Shadow Infection" class="h-6 w-6 object-contain" />
+        <img
+          :src="appIcon"
+          alt="Shadow Infection"
+          class="h-6 w-6 object-contain"
+        />
       </div>
 
       <nav class="flex items-center gap-1">
@@ -75,7 +79,9 @@ const ui = useUiStore();
   cursor: pointer;
   color: var(--color-launcher-gold-dim);
   text-decoration: none;
-  transition: color 150ms ease, background-color 150ms ease;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
 }
 .header-icon-button:hover {
   background: rgba(253, 199, 135, 0.1);
@@ -95,7 +101,9 @@ const ui = useUiStore();
   text-transform: uppercase;
   color: #64748b;
   text-decoration: none;
-  transition: color 150ms ease, background-color 150ms ease;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
 }
 .header-nav-link:hover {
   background: rgba(253, 199, 135, 0.1);

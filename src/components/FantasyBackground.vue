@@ -25,7 +25,8 @@ const ready = ref(false);
 let loadToken = 0;
 
 const prefersReducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const swapTo = async (src: string, objectPosition: string) => {
   const token = ++loadToken;
@@ -60,7 +61,8 @@ watch(
   () => [props.src, props.objectPosition] as const,
   ([src, objectPosition]) => {
     const current = layers.value[active.value];
-    if (current.src === src && current.objectPosition === objectPosition) return;
+    if (current.src === src && current.objectPosition === objectPosition)
+      return;
     void swapTo(src, objectPosition);
   },
 );
@@ -120,8 +122,18 @@ onMounted(() => {
   z-index: 2;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 50% 40%, transparent 35%, rgba(0, 4, 10, 0.55) 100%),
-    linear-gradient(180deg, rgba(0, 4, 10, 0.35) 0%, transparent 18%, transparent 82%, rgba(0, 4, 10, 0.55) 100%);
+    radial-gradient(
+      ellipse at 50% 40%,
+      transparent 35%,
+      rgba(0, 4, 10, 0.55) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(0, 4, 10, 0.35) 0%,
+      transparent 18%,
+      transparent 82%,
+      rgba(0, 4, 10, 0.55) 100%
+    );
 }
 
 .fantasy-background-image {
@@ -151,8 +163,20 @@ onMounted(() => {
   inset: 0;
   z-index: 1;
   background:
-    linear-gradient(90deg, rgba(0, 4, 10, 0.82) 0%, rgba(0, 4, 10, 0.42) 38%, rgba(0, 4, 10, 0.08) 68%, transparent 100%),
-    linear-gradient(180deg, rgba(0, 4, 10, 0.5) 0%, transparent 22%, transparent 58%, rgba(0, 4, 10, 0.7) 100%);
+    linear-gradient(
+      90deg,
+      rgba(0, 4, 10, 0.82) 0%,
+      rgba(0, 4, 10, 0.42) 38%,
+      rgba(0, 4, 10, 0.08) 68%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(0, 4, 10, 0.5) 0%,
+      transparent 22%,
+      transparent 58%,
+      rgba(0, 4, 10, 0.7) 100%
+    );
 }
 
 .fantasy-background-scrim--login {

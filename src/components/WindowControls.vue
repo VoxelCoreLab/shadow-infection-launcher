@@ -64,7 +64,9 @@ function closeWindow() {
   border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-launcher-gold-dim);
-  transition: color 150ms ease, background-color 150ms ease;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
   -webkit-app-region: no-drag;
 }
 .header-icon-button:hover {

@@ -9,7 +9,9 @@ import patchNotesBg from "@/assets/patch-notes-bg-twilight-lake.png";
 
 const route = useRoute();
 const isPatchNotes = computed(() => route.name === "patch-notes");
-const backgroundSrc = computed(() => (isPatchNotes.value ? patchNotesBg : mainBg));
+const backgroundSrc = computed(() =>
+  isPatchNotes.value ? patchNotesBg : mainBg,
+);
 const backgroundPosition = computed(() =>
   isPatchNotes.value ? "center 45%" : "center 40%",
 );
@@ -21,7 +23,10 @@ const backgroundPosition = computed(() =>
       <Header />
     </template>
     <div class="relative h-full">
-      <FantasyBackground :src="backgroundSrc" :object-position="backgroundPosition" />
+      <FantasyBackground
+        :src="backgroundSrc"
+        :object-position="backgroundPosition"
+      />
       <main class="relative z-10 h-full p-6">
         <RouterView />
       </main>
