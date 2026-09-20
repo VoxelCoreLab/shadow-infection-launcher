@@ -26,11 +26,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Format
+        run: npm run format
+
       - name: Lint
         run: npm run lint
 
-      - name: Format
-        run: npm run format
+      - name: Unit test
+        run: npm run test
 
   rust:
     name: Rust
@@ -67,6 +70,9 @@ jobs:
 
       - name: Lint
         run: npm run lint:rust
+
+      - name: Unit test
+        run: npm run test:rust
 
   build:
     name: Build on ${{ matrix.platform }} ${{ matrix.args }}
