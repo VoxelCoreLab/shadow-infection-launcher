@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import AppShell from "@/layouts/AppShell.vue";
+import FantasyBackground from "@/components/FantasyBackground.vue";
 import Header from "@/components/Header.vue";
 import mainBg from "@/assets/main-bg-mountain-lake.png";
 import patchNotesBg from "@/assets/patch-notes-bg-twilight-lake.png";
@@ -20,14 +21,7 @@ const backgroundPosition = computed(() =>
       <Header />
     </template>
     <div class="relative h-full">
-      <div class="absolute inset-0 overflow-hidden" aria-hidden="true">
-        <img
-          :src="backgroundSrc"
-          alt=""
-          class="h-full w-full object-cover"
-          :style="{ objectPosition: backgroundPosition }"
-        />
-      </div>
+      <FantasyBackground :src="backgroundSrc" :object-position="backgroundPosition" />
       <main class="relative z-10 h-full p-6">
         <RouterView />
       </main>

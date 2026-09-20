@@ -21,12 +21,12 @@ const ui = useUiStore();
 
       <nav class="flex items-center gap-1">
         <RouterLink
-          to="/spiel"
+          to="/play"
           class="header-nav-link"
           exact-active-class="header-nav-link--active"
           data-tauri-drag-region="false"
         >
-          Spiel
+          Play
         </RouterLink>
         <RouterLink
           to="/patch-notes"
@@ -42,7 +42,7 @@ const ui = useUiStore();
     <div class="flex items-center gap-1">
       <button
         type="button"
-        title="Einstellungen"
+        title="Settings"
         class="header-icon-button"
         data-tauri-drag-region="false"
         @click="ui.openSettings"
@@ -52,7 +52,7 @@ const ui = useUiStore();
 
       <RouterLink
         to="/login"
-        title="Login"
+        title="Log out"
         class="header-icon-button"
         data-tauri-drag-region="false"
       >

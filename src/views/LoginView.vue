@@ -7,9 +7,9 @@ const auth = useAuthStore();
 </script>
 
 <template>
-  <PagePlaceholder title="Das ist page Login">
-    <RouterLink to="/spiel" class="underline" @click="auth.isLoggedIn = true">
-      Login
+  <PagePlaceholder title="This is the Login page">
+    <RouterLink to="/play" class="underline" @click="auth.isLoggedIn = true">
+      Log in
     </RouterLink>
   </PagePlaceholder>
 </template>

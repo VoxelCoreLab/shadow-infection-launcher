@@ -11,13 +11,13 @@ const ui = useUiStore();
     @click.self="ui.closeSettings"
   >
     <div class="w-full max-w-md space-y-4 rounded-lg bg-white p-6 text-zinc-900 shadow-xl">
-      <h2 class="text-xl font-semibold">Das ist page Einstellungen</h2>
+      <h2 class="text-xl font-semibold">This is the Settings page</h2>
       <button
         type="button"
         class="rounded border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100"
         @click="ui.closeSettings"
       >
-        Schliessen
+        Close
       </button>
     </div>
   </div>

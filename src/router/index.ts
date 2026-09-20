@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import AuthLayout from "@/layouts/AuthLayout.vue";
 import AppLayout from "@/layouts/AppLayout.vue";
 import LoginView from "@/views/LoginView.vue";
-import SpielView from "@/views/SpielView.vue";
+import PlayView from "@/views/PlayView.vue";
 import PatchNotesView from "@/views/PatchNotesView.vue";
 
 const router = createRouter({
@@ -25,12 +25,12 @@ const router = createRouter({
       children: [
         {
           path: "",
-          redirect: "/spiel",
+          redirect: "/play",
         },
         {
-          path: "spiel",
-          name: "spiel",
-          component: SpielView,
+          path: "play",
+          name: "play",
+          component: PlayView,
         },
         {
           path: "patch-notes",

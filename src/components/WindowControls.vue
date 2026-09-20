@@ -33,7 +33,7 @@ function closeWindow() {
   <div class="flex items-center gap-1" data-tauri-drag-region="false">
     <button
       type="button"
-      title="Minimieren"
+      title="Minimize"
       class="header-icon-button"
       :class="{ 'header-icon-button--overlay': variant === 'overlay' }"
       data-tauri-drag-region="false"
@@ -43,7 +43,7 @@ function closeWindow() {
     </button>
     <button
       type="button"
-      title="Schliessen"
+      title="Close"
       class="header-icon-button header-icon-button--danger"
       :class="{ 'header-icon-button--overlay': variant === 'overlay' }"
       data-tauri-drag-region="false"

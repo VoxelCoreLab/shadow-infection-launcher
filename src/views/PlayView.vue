@@ -3,5 +3,5 @@ import PagePlaceholder from "@/components/PagePlaceholder.vue";
 </script>
 
 <template>
-  <PagePlaceholder title="This is the Patch Notes page" />
+  <PagePlaceholder title="This is the Play page" />
 </template>
