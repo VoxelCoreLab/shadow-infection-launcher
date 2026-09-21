@@ -35,7 +35,10 @@ import { useAuthStore } from "./auth";
 
 function encodeJwt(payload: object): string {
   const json = JSON.stringify(payload);
-  const base64 = Buffer.from(json).toString("base64url");
+  const base64 = btoa(json)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
   return `e30.${base64}.sig`;
 }
 
