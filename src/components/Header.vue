@@ -12,8 +12,10 @@ const auth = useAuthStore();
 const router = useRouter();
 
 async function handleLogout() {
-  await auth.logout();
-  await router.push({ name: "login" });
+  const ok = await auth.logout();
+  if (ok) {
+    await router.push({ name: "login" });
+  }
 }
 </script>
 
@@ -53,7 +55,14 @@ async function handleLogout() {
 
     <div class="flex items-center gap-1">
       <span
-        v-if="auth.user?.email"
+        v-if="auth.error"
+        class="mr-2 max-w-56 truncate font-body text-xs text-red-400"
+        :title="auth.error"
+      >
+        {{ auth.error }}
+      </span>
+      <span
+        v-else-if="auth.user?.email"
         class="mr-2 select-none font-body text-xs text-slate-500"
         data-tauri-drag-region
       >

@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionError } from "@/lib/session";
 
 const signInWithEmailAndPassword = vi.fn();
 const signOut = vi.fn();
@@ -32,6 +33,24 @@ vi.mock("@/lib/session", async () => {
 
 import { useAuthStore } from "./auth";
 
+function encodeJwt(payload: object): string {
+  const json = JSON.stringify(payload);
+  const base64 = Buffer.from(json).toString("base64url");
+  return `e30.${base64}.sig`;
+}
+
+function idTokenFor(
+  uid: string,
+  email: string,
+  expiresInMs = 3_600_000,
+): string {
+  return encodeJwt({
+    sub: uid,
+    email,
+    exp: Math.floor((Date.now() + expiresInMs) / 1000),
+  });
+}
+
 describe("useAuthStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -40,7 +59,8 @@ describe("useAuthStore", () => {
   });
 
   it("logs in and stores the refresh token", async () => {
-    const getIdToken = vi.fn().mockResolvedValue("id-token-1");
+    const token = idTokenFor("uid-1", "a@example.com");
+    const getIdToken = vi.fn().mockResolvedValue(token);
     signInWithEmailAndPassword.mockResolvedValue({
       user: {
         uid: "uid-1",
@@ -60,7 +80,7 @@ describe("useAuthStore", () => {
     });
     expect(auth.isLoggedIn).toBe(true);
     expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
-    expect(await auth.getIdToken()).toBe("id-token-1");
+    expect(await auth.getIdToken()).toBe(token);
     expect(exchangeRefreshToken).not.toHaveBeenCalled();
   });
 
@@ -125,8 +145,42 @@ describe("useAuthStore", () => {
     expect(await auth.getIdToken()).toBeNull();
   });
 
+  it("does not clear the vault when session restore fails transiently", async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+    exchangeRefreshToken.mockRejectedValue(new SessionError("transient"));
+
+    const auth = useAuthStore();
+    await auth.initialize();
+
+    expect(auth.ready).toBe(true);
+    expect(auth.isLoggedIn).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("clear_refresh_token");
+  });
+
+  it("clears the vault when the stored refresh token is invalid", async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+    exchangeRefreshToken.mockRejectedValue(new SessionError("invalid_token"));
+
+    const auth = useAuthStore();
+    await auth.initialize();
+
+    expect(auth.isLoggedIn).toBe(false);
+    expect(invoke).toHaveBeenCalledWith("clear_refresh_token");
+  });
+
   it("clears the session and vault on logout", async () => {
-    const getIdToken = vi.fn().mockResolvedValue("id-token-1");
+    const token = idTokenFor("uid-1", "a@example.com");
+    const getIdToken = vi.fn().mockResolvedValue(token);
     signInWithEmailAndPassword.mockResolvedValue({
       user: {
         uid: "uid-1",
@@ -139,12 +193,164 @@ describe("useAuthStore", () => {
 
     const auth = useAuthStore();
     await auth.login("a@example.com", "secret");
-    await auth.logout();
+    const ok = await auth.logout();
 
+    expect(ok).toBe(true);
     expect(signOut).toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith("clear_refresh_token");
     expect(auth.isLoggedIn).toBe(false);
     expect(auth.user).toBeNull();
     expect(await auth.getIdToken()).toBeNull();
+  });
+
+  it("keeps the session when the vault cannot be cleared", async () => {
+    const token = idTokenFor("uid-1", "a@example.com");
+    signInWithEmailAndPassword.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi.fn().mockResolvedValue(token),
+      },
+    });
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "clear_refresh_token") {
+        throw new Error("vault locked");
+      }
+      return undefined;
+    });
+
+    const auth = useAuthStore();
+    await auth.login("a@example.com", "secret");
+    const ok = await auth.logout();
+
+    expect(ok).toBe(false);
+    expect(auth.isLoggedIn).toBe(true);
+    expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
+    expect(auth.error).toBe("Could not sign out. Please try again.");
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("refreshes an expired id token", async () => {
+    const expired = idTokenFor("uid-1", "a@example.com", 30_000);
+    signInWithEmailAndPassword.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi.fn().mockResolvedValue(expired),
+      },
+    });
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+    exchangeRefreshToken.mockResolvedValue({
+      idToken: "id-token-fresh",
+      refreshToken: "refresh-2",
+      expiresAt: Date.now() + 3_600_000,
+      uid: "uid-1",
+      email: "a@example.com",
+    });
+
+    const auth = useAuthStore();
+    await auth.login("a@example.com", "secret");
+
+    expect(await auth.getIdToken()).toBe("id-token-fresh");
+    expect(exchangeRefreshToken).toHaveBeenCalledWith(
+      "refresh-1",
+      "test-api-key",
+    );
+  });
+
+  it("keeps the vault when a refresh fails transiently", async () => {
+    const expired = idTokenFor("uid-1", "a@example.com", 30_000);
+    signInWithEmailAndPassword.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi.fn().mockResolvedValue(expired),
+      },
+    });
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+    exchangeRefreshToken.mockRejectedValue(new SessionError("transient"));
+
+    const auth = useAuthStore();
+    await auth.login("a@example.com", "secret");
+
+    expect(await auth.getIdToken()).toBeNull();
+    expect(auth.isLoggedIn).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("clear_refresh_token");
+  });
+
+  it("clears the session when a refresh token is invalid", async () => {
+    const expired = idTokenFor("uid-1", "a@example.com", 30_000);
+    signInWithEmailAndPassword.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi.fn().mockResolvedValue(expired),
+      },
+    });
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+    exchangeRefreshToken.mockRejectedValue(new SessionError("invalid_token"));
+
+    const auth = useAuthStore();
+    await auth.login("a@example.com", "secret");
+
+    expect(await auth.getIdToken()).toBeNull();
+    expect(auth.isLoggedIn).toBe(false);
+    expect(invoke).toHaveBeenCalledWith("clear_refresh_token");
+  });
+
+  it("shares an in-flight refresh across concurrent getIdToken calls", async () => {
+    let resolveExchange: ((value: unknown) => void) | undefined;
+    exchangeRefreshToken.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveExchange = resolve;
+        }),
+    );
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_refresh_token") {
+        return "refresh-1";
+      }
+      return undefined;
+    });
+
+    const auth = useAuthStore();
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+
+    await vi.waitFor(() => {
+      expect(resolveExchange).toBeTypeOf("function");
+    });
+    expect(exchangeRefreshToken).toHaveBeenCalledTimes(1);
+
+    resolveExchange?.({
+      idToken: "id-token-3",
+      refreshToken: "refresh-2",
+      expiresAt: Date.now() + 3_600_000,
+      uid: "uid-1",
+      email: "a@example.com",
+    });
+
+    expect(await first).toBe("id-token-3");
+    expect(await second).toBe("id-token-3");
+    expect(exchangeRefreshToken).toHaveBeenCalledTimes(1);
   });
 });

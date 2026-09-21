@@ -7,10 +7,12 @@ import { mapFirebaseError } from "@/lib/firebase-errors";
 import {
   exchangeRefreshToken,
   expiresAtFromIdToken,
+  isInvalidRefreshTokenError,
   type SessionTokens,
 } from "@/lib/session";
 
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+const LOGOUT_FAILED_MESSAGE = "Could not sign out. Please try again.";
 
 export type AuthUser = {
   uid: string;
@@ -27,6 +29,7 @@ export const useAuthStore = defineStore("auth", () => {
   const isLoggedIn = computed(() => user.value !== null);
 
   let initPromise: Promise<void> | null = null;
+  let refreshPromise: Promise<string | null> | null = null;
 
   function applySession(session: SessionTokens) {
     user.value = { uid: session.uid, email: session.email };
@@ -40,6 +43,14 @@ export const useAuthStore = defineStore("auth", () => {
     expiresAt.value = null;
   }
 
+  function hasFreshIdToken(): boolean {
+    return (
+      idToken.value !== null &&
+      expiresAt.value !== null &&
+      Date.now() < expiresAt.value - TOKEN_REFRESH_SKEW_MS
+    );
+  }
+
   async function persistRotatedRefreshToken(
     previous: string,
     next: string,
@@ -48,6 +59,14 @@ export const useAuthStore = defineStore("auth", () => {
       return;
     }
     await invoke("store_refresh_token", { token: next });
+  }
+
+  async function discardPersistedSession(): Promise<void> {
+    try {
+      await invoke("clear_refresh_token");
+    } catch {
+      // Vault is unavailable outside Tauri.
+    }
   }
 
   async function restoreSession(): Promise<void> {
@@ -60,11 +79,9 @@ export const useAuthStore = defineStore("auth", () => {
       const session = await exchangeRefreshToken(refreshToken, firebaseApiKey);
       await persistRotatedRefreshToken(refreshToken, session.refreshToken);
       applySession(session);
-    } catch {
-      try {
-        await invoke("clear_refresh_token");
-      } catch {
-        // Vault is unavailable outside Tauri; continue logged out.
+    } catch (err) {
+      if (isInvalidRefreshTokenError(err)) {
+        await discardPersistedSession();
       }
       clearSession();
     } finally {
@@ -94,12 +111,13 @@ export const useAuthStore = defineStore("auth", () => {
         token: credential.user.refreshToken,
       });
 
-      user.value = {
+      applySession({
+        idToken: token,
+        refreshToken: credential.user.refreshToken,
+        expiresAt: expiresAtFromIdToken(token),
         uid: credential.user.uid,
         email: credential.user.email,
-      };
-      idToken.value = token;
-      expiresAt.value = expiresAtFromIdToken(token);
+      });
       return true;
     } catch (err: unknown) {
       error.value = mapFirebaseError(err);
@@ -110,32 +128,26 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function logout(): Promise<void> {
-    try {
-      await signOut(auth);
-    } catch {
-      // Local session must still be cleared.
-    }
-
+  async function logout(): Promise<boolean> {
     try {
       await invoke("clear_refresh_token");
     } catch {
-      // Vault is unavailable outside Tauri.
+      error.value = LOGOUT_FAILED_MESSAGE;
+      return false;
+    }
+
+    try {
+      await signOut(auth);
+    } catch {
+      // In-memory Firebase session is secondary after the vault is cleared.
     }
 
     clearSession();
     error.value = null;
+    return true;
   }
 
-  async function getIdToken(): Promise<string | null> {
-    if (
-      idToken.value &&
-      expiresAt.value !== null &&
-      Date.now() < expiresAt.value - TOKEN_REFRESH_SKEW_MS
-    ) {
-      return idToken.value;
-    }
-
+  async function refreshSession(): Promise<string | null> {
     try {
       const refreshToken = await invoke<string | null>("get_refresh_token");
       if (!refreshToken) {
@@ -147,15 +159,27 @@ export const useAuthStore = defineStore("auth", () => {
       await persistRotatedRefreshToken(refreshToken, session.refreshToken);
       applySession(session);
       return session.idToken;
-    } catch {
-      try {
-        await invoke("clear_refresh_token");
-      } catch {
-        // Vault is unavailable outside Tauri.
+    } catch (err) {
+      if (isInvalidRefreshTokenError(err)) {
+        await discardPersistedSession();
+        clearSession();
       }
-      clearSession();
       return null;
     }
+  }
+
+  async function getIdToken(): Promise<string | null> {
+    if (hasFreshIdToken()) {
+      return idToken.value;
+    }
+
+    if (!refreshPromise) {
+      refreshPromise = refreshSession().finally(() => {
+        refreshPromise = null;
+      });
+    }
+
+    return refreshPromise;
   }
 
   function clearError() {
@@ -164,7 +188,6 @@ export const useAuthStore = defineStore("auth", () => {
 
   return {
     user,
-    idToken,
     loading,
     error,
     ready,

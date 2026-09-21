@@ -113,4 +113,14 @@ mod tests {
         let vault = InMemoryVault::default();
         assert!(vault.clear().is_ok());
     }
+
+    #[test]
+    fn native_credential_store_allows_entry_creation() {
+        let result = Entry::new(SERVICE, ACCOUNT);
+        assert!(
+            result.is_ok(),
+            "native keyring backend is not compiled in: {:?}",
+            result.err()
+        );
+    }
 }

@@ -27,11 +27,23 @@ function getOrInitApp(): FirebaseApp {
   return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 }
 
+function isAlreadyInitialized(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === "auth/already-initialized"
+  );
+}
+
 function getOrInitAuth(app: FirebaseApp): Auth {
   try {
     return initializeAuth(app, { persistence: inMemoryPersistence });
-  } catch {
-    return getAuth(app);
+  } catch (error) {
+    if (isAlreadyInitialized(error)) {
+      return getAuth(app);
+    }
+    throw error;
   }
 }
 
