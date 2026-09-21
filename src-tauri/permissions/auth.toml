@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-store-refresh-token"
+description = "Allows storing the Firebase refresh token in the OS credential store."
+commands.allow = ["store_refresh_token"]
+
+[[permission]]
+identifier = "allow-get-refresh-token"
+description = "Allows reading the Firebase refresh token from the OS credential store."
+commands.allow = ["get_refresh_token"]
+
+[[permission]]
+identifier = "allow-clear-refresh-token"
+description = "Allows deleting the Firebase refresh token from the OS credential store."
+commands.allow = ["clear_refresh_token"]

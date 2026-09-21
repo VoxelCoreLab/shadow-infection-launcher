@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import { useUiStore } from "@/stores/ui";
+import { useAuthStore } from "@/stores/auth";
 import IconLogout from "@/components/icons/IconLogout.vue";
 import IconSettings from "@/components/icons/IconSettings.vue";
 import WindowControls from "@/components/WindowControls.vue";
 import appIcon from "../../src-tauri/icons/icon.png";
 
 const ui = useUiStore();
+const auth = useAuthStore();
+const router = useRouter();
+
+async function handleLogout() {
+  await auth.logout();
+  await router.push({ name: "login" });
+}
 </script>
 
 <template>
@@ -44,6 +52,14 @@ const ui = useUiStore();
     </div>
 
     <div class="flex items-center gap-1">
+      <span
+        v-if="auth.user?.email"
+        class="mr-2 select-none font-body text-xs text-slate-500"
+        data-tauri-drag-region
+      >
+        {{ auth.user.email }}
+      </span>
+
       <button
         type="button"
         title="Settings"
@@ -54,14 +70,15 @@ const ui = useUiStore();
         <IconSettings />
       </button>
 
-      <RouterLink
-        to="/login"
+      <button
+        type="button"
         title="Log out"
         class="header-icon-button"
         data-tauri-drag-region="false"
+        @click="handleLogout"
       >
         <IconLogout />
-      </RouterLink>
+      </button>
 
       <WindowControls />
     </div>
