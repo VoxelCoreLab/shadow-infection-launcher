@@ -77,14 +77,14 @@ async function openWebsitePath(path: string) {
     <div class="mt-5 flex items-center justify-center gap-4 text-center">
       <button
         type="button"
-        class="font-body text-sm text-slate-500 transition-colors hover:text-launcher-gold"
+        class="cursor-pointer font-body text-sm text-slate-500 transition-colors hover:text-launcher-gold"
         @click="openWebsitePath('/forgot-password')"
       >
         Forgot password?
       </button>
       <button
         type="button"
-        class="font-body text-sm text-slate-500 transition-colors hover:text-launcher-gold"
+        class="cursor-pointer font-body text-sm text-slate-500 transition-colors hover:text-launcher-gold"
         @click="openWebsitePath('/register')"
       >
         Create account
