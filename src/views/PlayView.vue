@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import PagePlaceholder from "@/components/PagePlaceholder.vue";
-import { patchNotesApi, shopApi } from "@/api";
+import {
+  fetchDownloadForPlatform,
+  fetchLatestVersions,
+  patchNotesApi,
+  shopApi,
+} from "@/api";
+import { detectGameDownloadPlatform } from "@/lib/platform";
 
 type ApiProbe = {
   label: string;
@@ -9,10 +15,22 @@ type ApiProbe = {
   detail: string;
 };
 
+const platform = detectGameDownloadPlatform();
+
 const probes = ref<ApiProbe[]>([
   { label: "Patch Notes API (öffentlich)", status: "pending", detail: "…" },
   { label: "Shop API (öffentlich)", status: "pending", detail: "…" },
   { label: "Shop API Lizenz (Bearer)", status: "pending", detail: "…" },
+  {
+    label: "Shop API Versionen (/game-downloads/latest)",
+    status: "pending",
+    detail: "…",
+  },
+  {
+    label: `Shop API Download-URL (${platform})`,
+    status: "pending",
+    detail: "…",
+  },
 ]);
 
 async function probe(
@@ -48,6 +66,8 @@ onMounted(() => {
     const res = await shopApi.gameLicences.gameLicencesControllerGetMyLicence();
     return res.data;
   });
+  void probe(3, () => fetchLatestVersions());
+  void probe(4, () => fetchDownloadForPlatform(platform));
 });
 </script>
 
@@ -55,8 +75,8 @@ onMounted(() => {
   <PagePlaceholder title="This is the Play page">
     <div class="flex w-full flex-col gap-3 text-sm">
       <p class="text-muted-foreground opacity-80">
-        Smoke-Test der neuen API-Clients (öffentlich + gesicherter
-        Lizenz-Check).
+        Smoke-Test der API-Clients inkl. Versions- und Download-Endpunkte
+        (ohne Datei-Download).
       </p>
       <article
         v-for="probeItem in probes"
