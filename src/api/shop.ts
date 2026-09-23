@@ -1,8 +1,5 @@
 import { Api } from "./generated/shop/Api";
-import {
-  fetchWithAuthRetry,
-  firebaseSecurityWorker,
-} from "./firebase-auth";
+import { fetchWithAuthRetry, firebaseSecurityWorker } from "./firebase-auth";
 
 const DEFAULT_SHOP_API_URL = "https://shop-api.shadowinfection.com";
 

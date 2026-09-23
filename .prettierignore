@@ -1,5 +1,5 @@
 dist
 src-tauri
-src/api/generated
+src/api/generated/**
 package-lock.json
 node_modules
