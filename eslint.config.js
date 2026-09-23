@@ -15,6 +15,7 @@ export default defineConfigWithVueTs(
     "**/dist/**",
     "**/dist-ssr/**",
     "**/src-tauri/**",
+    "**/src/api/generated/**",
     "**/*.d.ts",
   ]),
   pluginVue.configs["flat/essential"],

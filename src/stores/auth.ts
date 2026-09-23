@@ -148,6 +148,15 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function refreshSession(): Promise<string | null> {
+    if (!refreshPromise) {
+      refreshPromise = performRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    return refreshPromise;
+  }
+
+  async function performRefresh(): Promise<string | null> {
     try {
       const refreshToken = await invoke<string | null>("get_refresh_token");
       if (!refreshToken) {
@@ -173,13 +182,7 @@ export const useAuthStore = defineStore("auth", () => {
       return idToken.value;
     }
 
-    if (!refreshPromise) {
-      refreshPromise = refreshSession().finally(() => {
-        refreshPromise = null;
-      });
-    }
-
-    return refreshPromise;
+    return refreshSession();
   }
 
   function clearError() {
@@ -196,6 +199,7 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     logout,
     getIdToken,
+    refreshSession,
     clearError,
   };
 });
