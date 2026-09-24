@@ -66,6 +66,7 @@ pub struct FakeDownloader {
     pub bytes: Vec<u8>,
     pub fail: bool,
     pub last_resume_from: Mutex<Option<u64>>,
+    pub call_count: Mutex<u32>,
     pub truncate_to: Option<u64>,
 }
 
@@ -75,6 +76,7 @@ impl FakeDownloader {
             bytes,
             fail: false,
             last_resume_from: Mutex::new(None),
+            call_count: Mutex::new(0),
             truncate_to: None,
         }
     }
@@ -84,6 +86,7 @@ impl FakeDownloader {
             bytes: Vec::new(),
             fail: true,
             last_resume_from: Mutex::new(None),
+            call_count: Mutex::new(0),
             truncate_to: None,
         }
     }
@@ -99,6 +102,7 @@ impl HttpDownloader for FakeDownloader {
         progress: &dyn ProgressSink,
     ) -> Result<u64, String> {
         *self.last_resume_from.lock().unwrap() = Some(resume_from);
+        *self.call_count.lock().unwrap() += 1;
         if self.fail {
             return Err("http download failed".into());
         }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useUiStore } from "@/stores/ui";
 import { useSettingsStore } from "@/stores/settings";
 import { useInstallStore } from "@/stores/install";
@@ -10,6 +10,21 @@ const settings = useSettingsStore();
 const install = useInstallStore();
 
 const confirmUninstall = ref(false);
+
+/** Path edits are blocked while busy or while a local install/download is tracked. */
+const pathLocked = computed(
+  () =>
+    install.isBusy ||
+    install.uninstalling ||
+    install.isInstalled ||
+    install.phase === "failed" ||
+    install.phase === "downloading" ||
+    install.phase === "extracting",
+);
+
+const settingsBusy = computed(
+  () => settings.loading || settings.saving || install.uninstalling || install.isBusy,
+);
 
 watch(
   () => ui.isSettingsOpen,
@@ -90,30 +105,36 @@ async function handleUninstall() {
             v-model="settings.installPath"
             type="text"
             class="min-w-0 flex-1 rounded border border-zinc-300 px-3 py-2 text-sm"
-            :disabled="settings.loading || settings.saving || install.uninstalling"
+            :disabled="settingsBusy || pathLocked"
           />
           <button
             type="button"
-            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100"
-            :disabled="settings.loading || settings.saving || install.uninstalling"
+            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-60"
+            :disabled="settingsBusy || pathLocked"
             @click="settings.browse()"
           >
             Browse
           </button>
           <button
             type="button"
-            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100"
-            :disabled="settings.loading || settings.saving || install.uninstalling"
+            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-60"
+            :disabled="settingsBusy || pathLocked"
             @click="settings.resetToDefaultPath()"
           >
             Reset
           </button>
         </div>
+        <p
+          v-if="pathLocked && !install.isBusy && !install.uninstalling"
+          class="text-xs text-zinc-500"
+        >
+          Uninstall the game before changing the install path.
+        </p>
         <div class="flex flex-wrap items-center gap-3 text-sm">
           <button
             type="button"
-            class="text-zinc-600 underline-offset-2 hover:underline"
-            :disabled="settings.loading || settings.saving || install.uninstalling"
+            class="text-zinc-600 underline-offset-2 hover:underline disabled:opacity-60"
+            :disabled="settingsBusy"
             @click="settings.openFolder()"
           >
             Open folder
@@ -168,7 +189,7 @@ async function handleUninstall() {
             settings.updateMode === 'auto' ? 'bg-emerald-500' : 'bg-zinc-300'
           "
           :aria-checked="settings.updateMode === 'auto'"
-          :disabled="settings.loading || settings.saving"
+          :disabled="settingsBusy"
           @click="settings.setAutoUpdates(settings.updateMode !== 'auto')"
         >
           <span
@@ -184,7 +205,7 @@ async function handleUninstall() {
         <button
           type="button"
           class="rounded border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100"
-          :disabled="settings.saving || install.uninstalling"
+          :disabled="settings.saving || install.uninstalling || install.isBusy"
           @click="handleCancel"
         >
           Cancel
@@ -192,7 +213,7 @@ async function handleUninstall() {
         <button
           type="button"
           class="rounded border-2 border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
-          :disabled="settings.loading || settings.saving || install.uninstalling"
+          :disabled="settingsBusy"
           @click="handleSave"
         >
           Save

@@ -141,6 +141,105 @@ fn resume_uses_range_offset_when_state_matches() {
 }
 
 #[test]
+fn complete_download_skips_redownload_on_retry() {
+    let root = temp_root("resume-complete");
+    let payload = b"abcdefghij".to_vec();
+    let downloader = Arc::new(FakeDownloader::ok(payload.clone()));
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, state) = build_service(
+        root.clone(),
+        Arc::clone(&downloader) as Arc<dyn HttpDownloader>,
+        extractor,
+    );
+
+    let temp = root.join("downloads").join("game-1.0.0.zip");
+    std::fs::create_dir_all(temp.parent().unwrap()).unwrap();
+    std::fs::write(&temp, &payload).unwrap();
+    state
+        .save(&InstallState {
+            version: None,
+            download: Some(DownloadProgress {
+                version: "1.0.0".into(),
+                size: payload.len() as u64,
+                bytes: payload.len() as u64,
+            }),
+            last_error: Some("extract failed".into()),
+        })
+        .unwrap();
+
+    service
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
+        .unwrap();
+
+    assert_eq!(*downloader.call_count.lock().unwrap(), 0);
+    assert!(downloader.last_resume_from.lock().unwrap().is_none());
+    assert_eq!(service.status().unwrap().phase, InstallPhase::Installed);
+    assert!(!temp.exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn download_progress_preserves_installed_version() {
+    let root = temp_root("preserve-version");
+    let blocker = Arc::new(BlockingDownloader {
+        started: Mutex::new(None),
+        release: Mutex::new(false),
+    });
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, state) = build_service(
+        root.clone(),
+        Arc::clone(&blocker) as Arc<dyn HttpDownloader>,
+        extractor,
+    );
+    let service = Arc::new(service);
+
+    // Seed an installed version, then start an update that blocks mid-download.
+    state
+        .save(&InstallState {
+            version: Some("1.0.0".into()),
+            download: None,
+            last_error: None,
+        })
+        .unwrap();
+
+    let service_clone = Arc::clone(&service);
+    let handle = std::thread::spawn(move || {
+        service_clone
+            .install(
+                "https://example.test/game.zip",
+                "2.0.0",
+                &RecordingProgressSink::default(),
+            )
+            .unwrap();
+    });
+
+    for _ in 0..50 {
+        if blocker.started.lock().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(blocker.started.lock().unwrap().is_some());
+
+    // Progress checkpoint from BlockingDownloader must not wipe version.
+    let mid = state.load().unwrap();
+    assert_eq!(mid.version.as_deref(), Some("1.0.0"));
+    assert!(mid.download.is_some());
+
+    *blocker.release.lock().unwrap() = true;
+    handle.join().unwrap();
+    assert_eq!(
+        state.load().unwrap().version.as_deref(),
+        Some("2.0.0")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn resume_mismatch_version_starts_from_zero() {
     let root = temp_root("resume-mismatch");
     let payload = b"abcdefghij".to_vec();
@@ -300,6 +399,13 @@ impl HttpDownloader for BlockingDownloader {
         progress: &dyn ProgressSink,
     ) -> Result<u64, String> {
         *self.started.lock().unwrap() = Some(());
+        // Emit an early checkpoint so RecordingAndForwardingSink persists mid-download.
+        progress.on_progress(super::traits::ProgressUpdate {
+            downloaded: 1,
+            total: Some(4),
+            percent: Some(25.0),
+            phase: super::traits::ProgressPhase::Download,
+        });
         loop {
             if *self.release.lock().unwrap() {
                 break;

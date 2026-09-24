@@ -95,9 +95,25 @@ pub fn get_default_install_path() -> String {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: LauncherSettings) -> Result<LauncherSettings, String> {
     with_runtime(&app, |rt| {
+        if rt.service.is_busy()? {
+            return Err("cannot change settings while an installation is running".into());
+        }
+
         let mut normalized = settings;
         normalized.install_path = normalized.install_path.trim().to_string();
         validate_settings(&normalized)?;
+
+        let current = rt.settings.load()?;
+        if current.install_path.trim() != normalized.install_path {
+            let state = rt.service.install_state()?;
+            if state.version.is_some() || state.download.is_some() {
+                return Err(
+                    "uninstall the game (or cancel the download) before changing the install path"
+                        .into(),
+                );
+            }
+        }
+
         rt.settings.save(&normalized)?;
         rt.settings.load()
     })

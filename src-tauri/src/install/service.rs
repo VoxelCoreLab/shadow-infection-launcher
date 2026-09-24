@@ -34,6 +34,14 @@ impl InstallService {
         }
     }
 
+    pub fn is_busy(&self) -> Result<bool, String> {
+        Ok(self.busy.lock().map_err(|e| e.to_string())?.is_some())
+    }
+
+    pub fn install_state(&self) -> Result<InstallState, String> {
+        self.state_store.load()
+    }
+
     pub fn status(&self) -> Result<InstallStatusDto, String> {
         let install_path = self.paths.install_path()?;
         let state = self.state_store.load()?;
@@ -94,7 +102,11 @@ impl InstallService {
         state.last_error = None;
         let _ = self.state_store.save(&state);
 
-        let (resume_from, expected_total) = self.resume_plan(&state, version, &temp_file);
+        let resume = self.resume_plan(&state, version, &temp_file);
+        let expected_total_for_check = match &resume {
+            ResumePlan::NeedDownload { expected_total, .. } => *expected_total,
+            ResumePlan::AlreadyComplete { .. } => None,
+        };
 
         let download_progress = RecordingAndForwardingSink {
             inner: progress,
@@ -103,28 +115,50 @@ impl InstallService {
             last_saved_bytes: Mutex::new(None),
         };
 
-        progress.on_progress(ProgressUpdate {
-            downloaded: 0,
-            total: expected_total,
-            percent: Some(0.0),
-            phase: ProgressPhase::Download,
-        });
+        let downloaded = match resume {
+            ResumePlan::AlreadyComplete { size } => {
+                progress.on_progress(ProgressUpdate {
+                    downloaded: size,
+                    total: Some(size),
+                    percent: Some(100.0),
+                    phase: ProgressPhase::Download,
+                });
+                size
+            }
+            ResumePlan::NeedDownload {
+                resume_from,
+                expected_total,
+            } => {
+                progress.on_progress(ProgressUpdate {
+                    downloaded: resume_from,
+                    total: expected_total,
+                    percent: expected_total.map(|t| {
+                        if t == 0 {
+                            0.0
+                        } else {
+                            (resume_from as f64 / t as f64 * 100.0).min(100.0)
+                        }
+                    }),
+                    phase: ProgressPhase::Download,
+                });
 
-        let downloaded = match self.downloader.download(
-            url,
-            &temp_file,
-            resume_from,
-            expected_total,
-            &download_progress,
-        ) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                self.persist_error(&err)?;
-                return Err(err);
+                match self.downloader.download(
+                    url,
+                    &temp_file,
+                    resume_from,
+                    expected_total,
+                    &download_progress,
+                ) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        self.persist_error(&err)?;
+                        return Err(err);
+                    }
+                }
             }
         };
 
-        if let Some(expected) = expected_total {
+        if let Some(expected) = expected_total_for_check {
             if downloaded != expected {
                 let err = format!(
                     "content length mismatch: expected {expected} bytes, got {downloaded}"
@@ -169,35 +203,63 @@ impl InstallService {
         state: &InstallState,
         version: &str,
         temp_file: &Path,
-    ) -> (u64, Option<u64>) {
+    ) -> ResumePlan {
         let Some(download) = &state.download else {
-            return (0, None);
+            return ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: None,
+            };
         };
         if download.version != version {
             let _ = std::fs::remove_file(temp_file);
-            return (0, None);
+            return ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: None,
+            };
         }
         if !temp_file.exists() {
-            return (0, Some(download.size).filter(|s| *s > 0));
+            return ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: Some(download.size).filter(|s| *s > 0),
+            };
         }
         let meta_len = std::fs::metadata(temp_file)
             .map(|m| m.len())
             .unwrap_or(0);
         if download.size > 0 && meta_len > download.size {
             let _ = std::fs::remove_file(temp_file);
-            return (0, Some(download.size));
+            return ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: Some(download.size),
+            };
         }
         if meta_len != download.bytes {
             if meta_len > 0 && meta_len < download.size {
-                return (meta_len, Some(download.size));
+                return ResumePlan::NeedDownload {
+                    resume_from: meta_len,
+                    expected_total: Some(download.size),
+                };
             }
             let _ = std::fs::remove_file(temp_file);
-            return (0, Some(download.size).filter(|s| *s > 0));
+            return ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: Some(download.size).filter(|s| *s > 0),
+            };
         }
-        if download.bytes > 0 && download.bytes < download.size {
-            (download.bytes, Some(download.size))
+        if download.size > 0 && download.bytes == download.size && meta_len == download.size {
+            ResumePlan::AlreadyComplete {
+                size: download.size,
+            }
+        } else if download.bytes > 0 && download.bytes < download.size {
+            ResumePlan::NeedDownload {
+                resume_from: download.bytes,
+                expected_total: Some(download.size),
+            }
         } else {
-            (0, Some(download.size).filter(|s| *s > 0))
+            ResumePlan::NeedDownload {
+                resume_from: 0,
+                expected_total: Some(download.size).filter(|s| *s > 0),
+            }
         }
     }
 
@@ -240,6 +302,16 @@ impl InstallService {
     }
 }
 
+enum ResumePlan {
+    NeedDownload {
+        resume_from: u64,
+        expected_total: Option<u64>,
+    },
+    AlreadyComplete {
+        size: u64,
+    },
+}
+
 struct RecordingAndForwardingSink<'a> {
     inner: &'a dyn ProgressSink,
     version: String,
@@ -280,15 +352,15 @@ impl ProgressSink for RecordingAndForwardingSink<'_> {
             return;
         }
 
-        let state = InstallState {
-            version: None,
-            download: Some(DownloadProgress {
-                version: self.version.clone(),
-                size: total,
-                bytes: update.downloaded,
-            }),
-            last_error: None,
-        };
+        let mut state = self.state_store.load().unwrap_or_default();
+        // Keep any already-installed version so crash/retry mid-download does not
+        // look like an uninstall (files remain on disk until swap succeeds).
+        state.download = Some(DownloadProgress {
+            version: self.version.clone(),
+            size: total,
+            bytes: update.downloaded,
+        });
+        state.last_error = None;
         let _ = self.state_store.save(&state);
     }
 }
