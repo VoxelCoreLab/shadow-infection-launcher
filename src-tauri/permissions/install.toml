@@ -1,0 +1,34 @@
+[[permission]]
+identifier = "allow-get-settings"
+description = "Allows reading launcher settings."
+commands.allow = ["get_settings"]
+
+[[permission]]
+identifier = "allow-save-settings"
+description = "Allows saving launcher settings."
+commands.allow = ["save_settings"]
+
+[[permission]]
+identifier = "allow-get-default-install-path"
+description = "Allows reading the default install path."
+commands.allow = ["get_default_install_path"]
+
+[[permission]]
+identifier = "allow-open-install-folder"
+description = "Allows opening the install folder in the system file manager."
+commands.allow = ["open_install_folder"]
+
+[[permission]]
+identifier = "allow-get-install-status"
+description = "Allows reading the local game install status."
+commands.allow = ["get_install_status"]
+
+[[permission]]
+identifier = "allow-start-install"
+description = "Allows downloading and installing a game build."
+commands.allow = ["start_install"]
+
+[[permission]]
+identifier = "allow-uninstall-game"
+description = "Allows uninstalling the local game installation."
+commands.allow = ["uninstall_game"]

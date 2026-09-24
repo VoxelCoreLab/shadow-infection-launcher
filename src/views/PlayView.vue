@@ -1,106 +1,198 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import PagePlaceholder from "@/components/PagePlaceholder.vue";
-import {
-  fetchDownloadForPlatform,
-  fetchLatestVersions,
-  patchNotesApi,
-  shopApi,
-} from "@/api";
-import { detectGameDownloadPlatform } from "@/lib/platform";
+import { computed, onMounted } from "vue";
+import { storeToRefs } from "pinia";
+import { useInstallStore } from "@/stores/install";
+import titleWordmark from "@/assets/shadow-infection-title.png";
 
-type ApiProbe = {
-  label: string;
-  status: "pending" | "ok" | "error";
-  detail: string;
-};
-
-const platform = detectGameDownloadPlatform();
-
-const probes = ref<ApiProbe[]>([
-  { label: "Patch Notes API (öffentlich)", status: "pending", detail: "…" },
-  { label: "Shop API (öffentlich)", status: "pending", detail: "…" },
-  { label: "Shop API Lizenz (Bearer)", status: "pending", detail: "…" },
-  {
-    label: "Shop API Versionen (/game-downloads/latest)",
-    status: "pending",
-    detail: "…",
-  },
-  {
-    label: `Shop API Download-URL (${platform})`,
-    status: "pending",
-    detail: "…",
-  },
-]);
-
-async function probe(
-  index: number,
-  run: () => Promise<unknown>,
-): Promise<void> {
-  try {
-    const data = await run();
-    probes.value[index] = {
-      ...probes.value[index],
-      status: "ok",
-      detail: JSON.stringify(data, null, 2),
-    };
-  } catch (err) {
-    probes.value[index] = {
-      ...probes.value[index],
-      status: "error",
-      detail: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
+const install = useInstallStore();
+const {
+  phase,
+  loading,
+  percent,
+  downloaded,
+  total,
+  progressPhase,
+  error,
+  localVersion,
+  installPath,
+  isInstalled,
+  canStartInstall,
+} = storeToRefs(install);
 
 onMounted(() => {
-  void probe(0, async () => {
-    const res = await patchNotesApi.appControllerGetRoot();
-    return res.data;
-  });
-  void probe(1, async () => {
-    const res = await shopApi.appControllerGetHello();
-    return res.data;
-  });
-  void probe(2, async () => {
-    const res = await shopApi.gameLicences.gameLicencesControllerGetMyLicence();
-    return res.data;
-  });
-  void probe(3, () => fetchLatestVersions());
-  void probe(4, () => fetchDownloadForPlatform(platform));
+  void install.refreshStatus();
 });
+
+const showProgress = computed(
+  () =>
+    loading.value ||
+    phase.value === "downloading" ||
+    phase.value === "extracting",
+);
+
+const statusLabel = computed(() => {
+  switch (phase.value) {
+    case "not_installed":
+      return "Not installed";
+    case "downloading":
+      return "Downloading";
+    case "extracting":
+      return "Extracting";
+    case "installed":
+      return "Installed";
+    case "failed":
+      return "Error";
+    default:
+      return phase.value;
+  }
+});
+
+const statusColor = computed(() => {
+  switch (phase.value) {
+    case "installed":
+      return "text-emerald-400";
+    case "downloading":
+    case "extracting":
+      return "text-amber-400";
+    case "failed":
+      return "text-red-400";
+    default:
+      return "text-slate-400";
+  }
+});
+
+const primaryLabel = computed(() => {
+  if (phase.value === "downloading") {
+    return "Downloading…";
+  }
+  if (phase.value === "extracting" || loading.value) {
+    return "Installing…";
+  }
+  if (isInstalled.value) {
+    return "Installed";
+  }
+  if (phase.value === "failed") {
+    return "Retry install";
+  }
+  return "Install";
+});
+
+const progressPercent = computed(() => {
+  const raw = Math.min(Math.max(percent.value ?? 0, 0), 100);
+  if (showProgress.value && raw < 2) {
+    return 2;
+  }
+  return raw;
+});
+
+const progressLabel = computed(() => {
+  if (progressPhase.value === "extract") {
+    return "Extracting";
+  }
+  return `${install.formatBytes(downloaded.value)} / ${install.formatBytes(total.value)}`;
+});
+
+const progressPercentLabel = computed(
+  () => `${(percent.value ?? 0).toFixed(0)}%`,
+);
 </script>
 
 <template>
-  <PagePlaceholder title="This is the Play page">
-    <div class="flex w-full flex-col gap-3 text-sm">
-      <p class="text-muted-foreground opacity-80">
-        Smoke-Test der API-Clients inkl. Versions- und Download-Endpunkte
-        (ohne Datei-Download).
-      </p>
-      <article
-        v-for="probeItem in probes"
-        :key="probeItem.label"
-        class="rounded border border-white/10 bg-black/20 p-3"
-      >
-        <header
-          class="mb-2 flex items-center justify-between gap-2 font-medium"
+  <div class="relative flex h-full flex-col overflow-hidden">
+    <div class="relative flex h-full flex-col justify-between p-2 sm:p-4">
+      <div>
+        <img
+          :src="titleWordmark"
+          alt="Shadow Infection"
+          class="title-wordmark w-72 max-w-full"
+        />
+      </div>
+
+      <div class="space-y-4">
+        <div
+          v-if="error"
+          class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 font-body text-sm text-red-400"
+          role="alert"
         >
-          <span>{{ probeItem.label }}</span>
-          <span
-            :class="{
-              'text-amber-300': probeItem.status === 'pending',
-              'text-emerald-300': probeItem.status === 'ok',
-              'text-rose-300': probeItem.status === 'error',
-            }"
+          {{ error }}
+        </div>
+
+        <div
+          v-if="showProgress"
+          class="w-full max-w-md space-y-1.5 font-body"
+        >
+          <div class="flex justify-between text-xs text-slate-400">
+            <span>{{ progressLabel }}</span>
+            <span>{{ progressPercentLabel }}</span>
+          </div>
+          <div
+            class="h-1.5 w-full overflow-hidden rounded-full border border-launcher-border bg-black/40"
           >
-            {{ probeItem.status }}
+            <div
+              class="progress-bar-inner h-full rounded-full transition-[width] duration-200"
+              :style="{ width: `${progressPercent}%` }"
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 font-body">
+          <span :class="`text-sm font-medium ${statusColor}`">
+            ● {{ statusLabel }}
           </span>
-        </header>
-        <pre
-          class="overflow-x-auto whitespace-pre-wrap break-all text-xs opacity-90"
-          >{{ probeItem.detail }}</pre>
-      </article>
+          <span
+            v-if="localVersion"
+            class="text-xs text-slate-500"
+          >
+            v{{ localVersion }}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          class="play-action disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="!canStartInstall || isInstalled"
+          @click="install.startGameInstall()"
+        >
+          {{ primaryLabel }}
+        </button>
+
+        <p
+          v-if="installPath"
+          class="max-w-md truncate font-body text-xs text-slate-600"
+          :title="installPath"
+        >
+          {{ installPath }}
+        </p>
+      </div>
     </div>
-  </PagePlaceholder>
+  </div>
 </template>
+
+<style scoped>
+.title-wordmark {
+  mix-blend-mode: lighten;
+}
+
+.progress-bar-inner {
+  background: linear-gradient(
+    90deg,
+    var(--color-launcher-gold-dim) 0%,
+    var(--color-launcher-gold) 100%
+  );
+}
+
+.play-action {
+  min-width: 12rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(253, 199, 135, 0.35);
+  background: linear-gradient(180deg, #fdc787 0%, #c4924d 100%);
+  padding: 0.75rem 1.25rem;
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1a0f04;
+  cursor: pointer;
+}
+</style>

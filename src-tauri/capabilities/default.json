@@ -9,8 +9,17 @@
     "core:window:allow-minimize",
     "core:window:allow-close",
     "opener:default",
+    "dialog:default",
+    "dialog:allow-open",
     "allow-store-refresh-token",
     "allow-get-refresh-token",
-    "allow-clear-refresh-token"
+    "allow-clear-refresh-token",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-get-default-install-path",
+    "allow-open-install-folder",
+    "allow-get-install-status",
+    "allow-start-install",
+    "allow-uninstall-game"
   ]
 }

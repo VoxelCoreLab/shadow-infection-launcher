@@ -27,3 +27,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local game installs from tauri dev (debug default path)
+tmp/

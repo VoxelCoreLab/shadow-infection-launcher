@@ -5,3 +5,16 @@ export {
   fetchLatestVersions,
 } from "./game-downloads";
 export { fetchWithAuthRetry, firebaseSecurityWorker } from "./firebase-auth";
+export {
+  getInstallStatus,
+  startInstall,
+  uninstallGame,
+  listenInstallProgress,
+} from "./install";
+export {
+  getSettings,
+  saveSettings,
+  getDefaultInstallPath,
+  openInstallFolder,
+  pickInstallDirectory,
+} from "./settings";
