@@ -119,7 +119,7 @@ const progressPercentLabel = computed(
 
         <div
           v-if="showProgress"
-          class="w-full max-w-md space-y-1.5 font-body"
+          class="w-full space-y-1.5 font-body"
         >
           <div class="flex justify-between text-xs text-slate-400">
             <span>{{ progressLabel }}</span>
