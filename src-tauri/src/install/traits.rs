@@ -99,11 +99,11 @@ pub trait HttpDownloader: Send + Sync {
 }
 
 pub trait ArchiveExtractor: Send + Sync {
-    /// Extracts `archive` into a staging dir next to `install_dir`, then swaps.
+    /// Clears `target_dir` (if present) and extracts `archive` directly into it.
     fn extract_and_swap(
         &self,
         archive: &Path,
-        install_dir: &Path,
+        target_dir: &Path,
         progress: &dyn ProgressSink,
     ) -> Result<(), String>;
 }

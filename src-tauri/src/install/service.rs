@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::layout::{
+    cleanup_old_installs, find_launch_target, get_verified_installed_version,
+    manifest_dir_for_target, verify_install, version_dir, write_active, write_version_manifest,
+};
 use super::traits::{
     ArchiveExtractor, DownloadProgress, HttpDownloader, InstallPhase, InstallState,
     InstallStateStore, InstallStatusDto, PathProvider, ProgressPhase, ProgressSink, ProgressUpdate,
@@ -44,7 +48,15 @@ impl InstallService {
 
     pub fn status(&self) -> Result<InstallStatusDto, String> {
         let install_path = self.paths.install_path()?;
-        let state = self.state_store.load()?;
+        let mut state = self.state_store.load()?;
+        // Prefer the on-disk active pointer when it verifies; keeps UI in sync
+        // if state.json drifted after a crash.
+        if let Some(disk) = get_verified_installed_version(&install_path) {
+            if state.version.as_deref() != Some(disk.as_str()) {
+                state.version = Some(disk.clone());
+                let _ = self.state_store.save(&state);
+            }
+        }
         let busy = *self.busy.lock().map_err(|e| e.to_string())?;
         let phase = if let Some(busy_phase) = busy {
             busy_phase
@@ -95,8 +107,9 @@ impl InstallService {
         version: &str,
         progress: &dyn ProgressSink,
     ) -> Result<(), String> {
-        let install_path = self.paths.install_path()?;
+        let install_root = self.paths.install_path()?;
         let temp_file = self.temp_download_path(version);
+        let target_dir = version_dir(&install_root, version);
 
         let mut state = self.state_store.load().unwrap_or_default();
         state.last_error = None;
@@ -178,10 +191,32 @@ impl InstallService {
             phase: ProgressPhase::Extract,
         });
 
+        std::fs::create_dir_all(&install_root).map_err(|e| e.to_string())?;
+
+        // Extract only into `{root}/{version}/` — never touch the previous build.
         if let Err(err) = self
             .extractor
-            .extract_and_swap(&temp_file, &install_path, progress)
+            .extract_and_swap(&temp_file, &target_dir, progress)
         {
+            let _ = std::fs::remove_dir_all(&target_dir);
+            self.persist_error(&err)?;
+            return Err(err);
+        }
+
+        let activate = (|| -> Result<(), String> {
+            let launch_target = find_launch_target(&target_dir).ok_or_else(|| {
+                "Game executable not found after extract. Installation is incomplete.".to_owned()
+            })?;
+            let manifest_dir = manifest_dir_for_target(&launch_target);
+            write_version_manifest(&manifest_dir, version)?;
+            verify_install(&target_dir, version)?;
+            write_active(&install_root, version)?;
+            cleanup_old_installs(&install_root, version)?;
+            Ok(())
+        })();
+
+        if let Err(err) = activate {
+            let _ = std::fs::remove_dir_all(&target_dir);
             self.persist_error(&err)?;
             return Err(err);
         }
@@ -288,15 +323,6 @@ impl InstallService {
             std::fs::remove_dir_all(&install_path).map_err(|e| e.to_string())?;
         }
 
-        let staging = super::extract::staging_dir(&install_path);
-        let backup = super::extract::backup_dir(&install_path);
-        if staging.exists() {
-            let _ = std::fs::remove_dir_all(&staging);
-        }
-        if backup.exists() {
-            let _ = std::fs::remove_dir_all(&backup);
-        }
-
         self.state_store.save(&InstallState::default())?;
         self.status()
     }
@@ -354,7 +380,7 @@ impl ProgressSink for RecordingAndForwardingSink<'_> {
 
         let mut state = self.state_store.load().unwrap_or_default();
         // Keep any already-installed version so crash/retry mid-download does not
-        // look like an uninstall (files remain on disk until swap succeeds).
+        // look like an uninstall (previous version folder stays active).
         state.download = Some(DownloadProgress {
             version: self.version.clone(),
             size: total,

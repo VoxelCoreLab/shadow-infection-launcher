@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use zip::ZipArchive;
 
@@ -20,61 +20,81 @@ impl ArchiveExtractor for ZipExtractor {
             .ok_or_else(|| "install path has no parent directory".to_string())?;
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
 
-        let staging = staging_dir(install_dir);
-        let backup = backup_dir(install_dir);
+        // Wipe the version target dir, then extract straight into it.
+        // Never rename a directory full of freshly written .exe/.dll — on
+        // Windows that fails with OS error 5 when Defender/Cursor hold a
+        // handle on the folder.
+        reset_dir(install_dir)?;
+        extract_zip(archive, install_dir, progress)?;
+        Ok(())
+    }
+}
 
-        if staging.exists() {
-            fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
-        }
-        if backup.exists() {
-            fs::remove_dir_all(&backup).map_err(|e| e.to_string())?;
-        }
+/// Wipe `dir` if it exists, then recreate it empty.
+fn reset_dir(dir: &Path) -> Result<(), String> {
+    if dir.exists() {
+        remove_dir_all_robust(dir)
+            .map_err(|e| format!("Cannot clear {}: {e}", dir.display()))?;
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))
+}
 
-        fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-        extract_zip(archive, &staging, progress)?;
-
-        if install_dir.exists() {
-            fs::rename(install_dir, &backup).map_err(|e| e.to_string())?;
-        }
-
-        match fs::rename(&staging, install_dir) {
-            Ok(()) => {
-                if backup.exists() {
-                    let _ = fs::remove_dir_all(&backup);
-                }
-                Ok(())
-            }
-            Err(err) => {
-                let _ = fs::remove_dir_all(install_dir);
-                if backup.exists() {
-                    let _ = fs::rename(&backup, install_dir);
-                }
-                Err(err.to_string())
-            }
+fn clear_readonly(path: &Path) {
+    if let Ok(metadata) = fs::metadata(path) {
+        let mut perms = metadata.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
         }
     }
 }
 
-pub(crate) fn staging_dir(install_dir: &Path) -> PathBuf {
-    let name = install_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("game");
-    install_dir
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!(".{name}.staging"))
+fn clear_readonly_tree(path: &Path) {
+    clear_readonly(path);
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let child = entry.path();
+        if child.is_dir() {
+            clear_readonly_tree(&child);
+        } else {
+            clear_readonly(&child);
+        }
+    }
 }
 
-pub(crate) fn backup_dir(install_dir: &Path) -> PathBuf {
-    let name = install_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("game");
-    install_dir
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!(".{name}.backup"))
+fn remove_dir_all_robust(path: &Path) -> std::io::Result<()> {
+    clear_readonly_tree(path);
+
+    #[cfg(not(windows))]
+    {
+        fs::remove_dir_all(path)
+    }
+
+    #[cfg(windows)]
+    {
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut delay = Duration::from_millis(50);
+        loop {
+            match fs::remove_dir_all(path) {
+                Ok(()) => return Ok(()),
+                Err(_) if !path.exists() => return Ok(()),
+                Err(e)
+                    if matches!(e.raw_os_error(), Some(5) | Some(32))
+                        && Instant::now() < deadline =>
+                {
+                    clear_readonly_tree(path);
+                    thread::sleep(delay);
+                    delay = (delay * 2).min(Duration::from_millis(400));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
 }
 
 fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Result<(), String> {
@@ -121,7 +141,7 @@ fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Resu
             None => continue,
         };
 
-        if entry.name().ends_with('/') {
+        if entry.is_dir() || entry.name().ends_with('/') {
             fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
         } else {
             if let Some(parent) = out_path.parent() {
@@ -151,6 +171,7 @@ fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Resu
 mod tests {
     use super::*;
     use crate::install::traits::ProgressSink;
+    use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
     use zip::write::SimpleFileOptions;
@@ -207,7 +228,24 @@ mod tests {
 
         let content = fs::read_to_string(install.join("hello.txt")).unwrap();
         assert_eq!(content, "hello");
-        assert!(!staging_dir(&install).exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replaces_existing_install_dir() {
+        let root = temp_dir("replace");
+        let archive = root.join("game.zip");
+        let install = root.join("game");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("old.txt"), b"stale").unwrap();
+        write_zip(&archive, &[("hello.txt", b"hello")]);
+
+        ZipExtractor
+            .extract_and_swap(&archive, &install, &NoopSink)
+            .unwrap();
+
+        assert!(install.join("hello.txt").exists());
+        assert!(!install.join("old.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -248,7 +286,6 @@ mod tests {
             .extract_and_swap(&archive, &install, &NoopSink)
             .unwrap_err();
         assert!(err.contains("invalid zip"));
-        assert!(!install.exists());
         let _ = fs::remove_dir_all(root);
     }
 }

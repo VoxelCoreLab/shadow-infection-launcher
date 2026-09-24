@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::layout::{
+    read_active_version, version_dir, write_active, write_version_manifest,
+};
 use super::test_fakes::{
     build_service, FakeDownloader, FakeExtractor, RecordingProgressSink,
 };
@@ -17,6 +20,21 @@ fn temp_root(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("sil-service-{label}-{nanos}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn exe_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "Shadow Infection.exe"
+    } else if cfg!(target_os = "macos") {
+        "Shadow Infection.app"
+    } else {
+        "ShadowInfection.x86_64"
+    }
+}
+
+fn version_payload_exists(install_root: &Path, version: &str) -> bool {
+    let dir = version_dir(install_root, version);
+    dir.join(exe_name()).exists()
 }
 
 #[test]
@@ -37,7 +55,9 @@ fn happy_path_installs_and_stores_version() {
 
     assert_eq!(status.phase, InstallPhase::Installed);
     assert_eq!(status.local_version.as_deref(), Some("1.0.0"));
-    assert!(Path::new(&status.install_path).join("game.bin").exists());
+    let install_root = Path::new(&status.install_path);
+    assert!(version_payload_exists(install_root, "1.0.0"));
+    assert_eq!(read_active_version(install_root).as_deref(), Some("1.0.0"));
     assert_eq!(state.load().unwrap().version.as_deref(), Some("1.0.0"));
     assert!(!sink.updates.lock().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(root);
@@ -85,7 +105,7 @@ fn content_length_mismatch_fails() {
         .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
         .unwrap_err();
     assert!(err.contains("content length mismatch"));
-    assert!(!root.join("game").join("game.bin").exists());
+    assert!(!version_payload_exists(&root.join("game"), "1.0.0"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -101,6 +121,64 @@ fn extractor_failure_keeps_uninstalled() {
         .unwrap_err();
     assert!(err.contains("extract failed"));
     assert_eq!(service.status().unwrap().phase, InstallPhase::Failed);
+    assert!(!version_dir(&root.join("game"), "1.0.0").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn extract_failure_keeps_previous_version_playable() {
+    let root = temp_root("keep-old");
+    let install_root = root.join("game");
+
+    // First install succeeds.
+    let downloader = Arc::new(FakeDownloader::ok(b"zip-bytes".to_vec()));
+    let (service, _) = build_service(
+        root.clone(),
+        Arc::clone(&downloader) as Arc<dyn HttpDownloader>,
+        Arc::new(FakeExtractor { fail: false }),
+    );
+    service
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
+        .unwrap();
+    assert!(version_payload_exists(&install_root, "1.0.0"));
+
+    // Update with failing extractor — previous build must remain active.
+    let (service, state) = build_service(
+        root.clone(),
+        downloader,
+        Arc::new(FakeExtractor { fail: true }),
+    );
+    write_active(&install_root, "1.0.0").unwrap();
+    write_version_manifest(&version_dir(&install_root, "1.0.0"), "1.0.0").unwrap();
+    state
+        .save(&InstallState {
+            version: Some("1.0.0".into()),
+            download: None,
+            last_error: None,
+        })
+        .unwrap();
+
+    let err = service
+        .install(
+            "https://example.test/game.zip",
+            "2.0.0",
+            &RecordingProgressSink::default(),
+        )
+        .unwrap_err();
+    assert!(err.contains("extract failed"));
+
+    assert_eq!(state.load().unwrap().version.as_deref(), Some("1.0.0"));
+    assert_eq!(read_active_version(&install_root).as_deref(), Some("1.0.0"));
+    assert!(version_payload_exists(&install_root, "1.0.0"));
+    assert!(!version_dir(&install_root, "2.0.0").exists());
+    assert_eq!(
+        service.status().unwrap().local_version.as_deref(),
+        Some("1.0.0")
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -333,7 +411,7 @@ fn uninstall_removes_install_and_clears_state() {
             &RecordingProgressSink::default(),
         )
         .unwrap();
-    assert!(root.join("game").join("game.bin").exists());
+    assert!(version_payload_exists(&root.join("game"), "1.0.0"));
 
     let status = service.uninstall().unwrap();
     assert_eq!(status.phase, InstallPhase::NotInstalled);

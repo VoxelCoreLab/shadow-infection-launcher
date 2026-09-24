@@ -2,6 +2,7 @@ pub mod commands;
 pub mod default_paths;
 pub mod download;
 pub mod extract;
+pub mod layout;
 pub mod paths;
 pub mod progress;
 pub mod service;

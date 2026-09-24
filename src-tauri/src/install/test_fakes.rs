@@ -149,7 +149,7 @@ impl ArchiveExtractor for FakeExtractor {
     fn extract_and_swap(
         &self,
         _archive: &Path,
-        install_dir: &Path,
+        target_dir: &Path,
         progress: &dyn ProgressSink,
     ) -> Result<(), String> {
         if self.fail {
@@ -161,8 +161,14 @@ impl ArchiveExtractor for FakeExtractor {
             percent: Some(0.0),
             phase: ProgressPhase::Extract,
         });
-        fs::create_dir_all(install_dir).map_err(|e| e.to_string())?;
-        fs::write(install_dir.join("game.bin"), b"ok").map_err(|e| e.to_string())?;
+        fs::create_dir_all(target_dir).map_err(|e| e.to_string())?;
+        // Match real Unity payload names so layout::find_launch_target succeeds.
+        #[cfg(target_os = "windows")]
+        fs::write(target_dir.join("Shadow Infection.exe"), b"ok").map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        fs::create_dir_all(target_dir.join("Shadow Infection.app")).map_err(|e| e.to_string())?;
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        fs::write(target_dir.join("ShadowInfection.x86_64"), b"ok").map_err(|e| e.to_string())?;
         progress.on_progress(ProgressUpdate {
             downloaded: 1,
             total: Some(1),
