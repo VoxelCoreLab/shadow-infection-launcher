@@ -100,7 +100,6 @@ fn current_platform() -> &'static str {
 }
 
 /// Directory that contains the live game build, if any (`active.json` → version folder).
-#[allow(dead_code)] // reserved for launch_game
 pub fn resolve_active_dir(install_root: &Path) -> Option<PathBuf> {
     let version = read_active_version(install_root)?;
     let dir = version_dir(install_root, &version);

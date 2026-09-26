@@ -20,6 +20,7 @@
     "allow-open-install-folder",
     "allow-get-install-status",
     "allow-start-install",
-    "allow-uninstall-game"
+    "allow-uninstall-game",
+    "allow-launch-game"
   ]
 }

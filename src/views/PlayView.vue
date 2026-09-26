@@ -14,13 +14,19 @@ const {
   progressPhase,
   error,
   localVersion,
+  remoteVersion,
   installPath,
   isInstalled,
-  canStartInstall,
+  updateAvailable,
+  canInstallOrUpdate,
+  canPlay,
+  checkingUpdate,
+  launching,
 } = storeToRefs(install);
 
-onMounted(() => {
-  void install.refreshStatus();
+onMounted(async () => {
+  await install.refreshStatus();
+  await install.checkForUpdate({ applyAuto: true });
 });
 
 const showProgress = computed(
@@ -31,6 +37,9 @@ const showProgress = computed(
 );
 
 const statusLabel = computed(() => {
+  if (updateAvailable.value && !showProgress.value) {
+    return "Update available";
+  }
   switch (phase.value) {
     case "not_installed":
       return "Not installed";
@@ -39,7 +48,7 @@ const statusLabel = computed(() => {
     case "extracting":
       return "Extracting";
     case "installed":
-      return "Installed";
+      return "Ready to play";
     case "failed":
       return "Error";
     default:
@@ -48,6 +57,9 @@ const statusLabel = computed(() => {
 });
 
 const statusColor = computed(() => {
+  if (updateAvailable.value && !showProgress.value) {
+    return "text-amber-400";
+  }
   switch (phase.value) {
     case "installed":
       return "text-emerald-400";
@@ -68,14 +80,38 @@ const primaryLabel = computed(() => {
   if (phase.value === "extracting" || loading.value) {
     return "Installing…";
   }
+  if (checkingUpdate.value) {
+    return "Checking…";
+  }
+  if (launching.value) {
+    return "Starting…";
+  }
+  if (updateAvailable.value) {
+    return "Update";
+  }
   if (isInstalled.value) {
-    return "Installed";
+    return "Play";
   }
   if (phase.value === "failed") {
     return "Retry install";
   }
   return "Install";
 });
+
+const primaryEnabled = computed(
+  () =>
+    !checkingUpdate.value &&
+    !launching.value &&
+    (canPlay.value || canInstallOrUpdate.value),
+);
+
+async function onPrimaryClick() {
+  if (canPlay.value) {
+    await install.launch();
+    return;
+  }
+  await install.startGameInstall();
+}
 
 const progressPercent = computed(() => {
   const raw = Math.min(Math.max(percent.value ?? 0, 0), 100);
@@ -145,13 +181,19 @@ const progressPercentLabel = computed(
           >
             v{{ localVersion }}
           </span>
+          <span
+            v-if="updateAvailable && remoteVersion"
+            class="text-xs text-amber-500/80"
+          >
+            → v{{ remoteVersion }}
+          </span>
         </div>
 
         <button
           type="button"
           class="play-action disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="!canStartInstall || isInstalled"
-          @click="install.startGameInstall()"
+          :disabled="!primaryEnabled"
+          @click="onPrimaryClick"
         >
           {{ primaryLabel }}
         </button>

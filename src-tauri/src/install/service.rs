@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use super::layout::{
     cleanup_old_installs, find_launch_target, get_verified_installed_version,
-    manifest_dir_for_target, verify_install, version_dir, write_active, write_version_manifest,
+    manifest_dir_for_target, resolve_active_dir, verify_install, version_dir, write_active,
+    write_version_manifest,
 };
 use super::traits::{
     ArchiveExtractor, DownloadProgress, HttpDownloader, InstallPhase, InstallState,
@@ -326,6 +327,123 @@ impl InstallService {
         self.state_store.save(&InstallState::default())?;
         self.status()
     }
+
+    /// Start the installed game process (FA-08 / UC-04).
+    pub fn launch_game(&self) -> Result<(), String> {
+        if self.is_busy()? {
+            return Err("cannot launch while an installation is running".into());
+        }
+
+        let install_path = self.paths.install_path()?;
+        let game_dir = resolve_active_dir(&install_path).ok_or_else(|| {
+            "Game is not installed. Install a version before launching.".to_owned()
+        })?;
+        let target = find_launch_target(&game_dir).ok_or_else(|| {
+            "Game executable not found. Reinstall the game and try again.".to_owned()
+        })?;
+
+        spawn_game_process(&target, &game_dir)
+    }
+}
+
+/// Platform-specific process start for a Unity / desktop game build.
+fn spawn_game_process(target: &Path, game_dir: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // `.app` bundles must be opened via Launch Services (`open`).
+        let _ = game_dir;
+        ensure_macos_app_executable(target)?;
+        let status = std::process::Command::new("open")
+            .arg(target)
+            .status()
+            .map_err(|e| format!("Failed to launch game: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "Failed to launch game: open exited with {status}"
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let work_dir = target.parent().unwrap_or(game_dir);
+        std::process::Command::new(target)
+            .current_dir(work_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to launch game: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(target) {
+                let mut perms = meta.permissions();
+                if perms.mode() & 0o111 == 0 {
+                    perms.set_mode(perms.mode() | 0o755);
+                    let _ = std::fs::set_permissions(target, perms);
+                }
+            }
+        }
+        let work_dir = target.parent().unwrap_or(game_dir);
+        std::process::Command::new(target)
+            .current_dir(work_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to launch game: {e}"))?;
+        Ok(())
+    }
+}
+
+/// Ensure `Contents/MacOS/*` binaries are executable after zip extract that
+/// dropped Unix modes (or for installs created before permission restore).
+#[cfg(target_os = "macos")]
+fn ensure_macos_app_executable(app_bundle: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let macos_dir = app_bundle.join("Contents/MacOS");
+    if !macos_dir.is_dir() {
+        return Err(format!(
+            "Invalid app bundle (missing Contents/MacOS): {}",
+            app_bundle.display()
+        ));
+    }
+
+    let entries = std::fs::read_dir(&macos_dir).map_err(|e| {
+        format!(
+            "Cannot read {}: {e}",
+            macos_dir.display()
+        )
+    })?;
+
+    let mut found = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        found = true;
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let mut perms = meta.permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(perms.mode() | 0o755);
+                std::fs::set_permissions(&path, perms).map_err(|e| {
+                    format!("Cannot set execute permission on {}: {e}", path.display())
+                })?;
+            }
+        }
+    }
+
+    if !found {
+        return Err(format!(
+            "Invalid app bundle (no MacOS binary): {}",
+            app_bundle.display()
+        ));
+    }
+
+    Ok(())
 }
 
 enum ResumePlan {

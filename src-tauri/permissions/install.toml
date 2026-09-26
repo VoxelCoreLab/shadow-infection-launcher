@@ -32,3 +32,8 @@ commands.allow = ["start_install"]
 identifier = "allow-uninstall-game"
 description = "Allows uninstalling the local game installation."
 commands.allow = ["uninstall_game"]
+
+[[permission]]
+identifier = "allow-launch-game"
+description = "Allows starting the installed game process."
+commands.allow = ["launch_game"]

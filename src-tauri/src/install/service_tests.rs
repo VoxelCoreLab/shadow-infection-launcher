@@ -462,6 +462,222 @@ fn uninstall_rejected_while_download_running() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn launch_fails_when_not_installed() {
+    let root = temp_root("launch-empty");
+    let downloader = Arc::new(FakeDownloader::ok(vec![]));
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, _) = build_service(root.clone(), downloader, extractor);
+
+    let err = service.launch_game().unwrap_err();
+    assert!(err.to_lowercase().contains("not installed"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn launch_fails_while_busy() {
+    let root = temp_root("launch-busy");
+    let blocker = Arc::new(BlockingDownloader {
+        started: Mutex::new(None),
+        release: Mutex::new(false),
+    });
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, _) = build_service(
+        root.clone(),
+        Arc::clone(&blocker) as Arc<dyn HttpDownloader>,
+        extractor,
+    );
+    let service = Arc::new(service);
+
+    let service_clone = Arc::clone(&service);
+    let handle = std::thread::spawn(move || {
+        let _ = service_clone.install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        );
+    });
+
+    for _ in 0..50 {
+        if blocker.started.lock().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let err = service.launch_game().unwrap_err();
+    assert!(err.contains("cannot launch"));
+
+    *blocker.release.lock().unwrap() = true;
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn launch_starts_process_when_installed() {
+    let root = temp_root("launch-ok");
+    #[allow(unused_variables)]
+    let marker = root.join("launched.marker");
+    let game_root = root.join("game");
+    let version = "1.0.0";
+    let vdir = version_dir(&game_root, version);
+    std::fs::create_dir_all(&vdir).unwrap();
+
+    #[cfg(target_os = "macos")]
+    {
+        let macos_dir = vdir.join("Shadow Infection.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos_dir).unwrap();
+        let script = macos_dir.join("ShadowInfection");
+        let body = format!("#!/bin/sh\ntouch '{}'\n", marker.display());
+        std::fs::write(&script, body).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        std::fs::write(
+            vdir.join("Shadow Infection.app/Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>ShadowInfection</string>
+  <key>CFBundleIdentifier</key><string>com.test.shadowinfection</string>
+  <key>CFBundleName</key><string>Shadow Infection</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Process spawn of a stub .exe is not reliable in unit tests; only
+        // assert that launch resolves the path (CreateProcess will fail on
+        // a text stub). Seed layout so find_launch_target succeeds.
+        let _ = &marker;
+        std::fs::write(vdir.join("Shadow Infection.exe"), b"MZ").unwrap();
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let bin = vdir.join("ShadowInfection.x86_64");
+        let body = format!("#!/bin/sh\ntouch '{}'\n", marker.display());
+        std::fs::write(&bin, body).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin, perms).unwrap();
+    }
+
+    write_version_manifest(&vdir, version).unwrap();
+    write_active(&game_root, version).unwrap();
+
+    let downloader = Arc::new(FakeDownloader::ok(vec![]));
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, state) = build_service(root.clone(), downloader, extractor);
+    state
+        .save(&InstallState {
+            version: Some(version.to_owned()),
+            download: None,
+            last_error: None,
+        })
+        .unwrap();
+
+    #[cfg(target_os = "windows")]
+    {
+        let err = service.launch_game().unwrap_err();
+        assert!(err.to_lowercase().contains("failed to launch") || err.contains("os error"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Path resolution always succeeds; `open` may still fail Launch Services
+        // checks on a minimal script-based .app (signing / sandbox). We wait on
+        // exit status now, so tolerate a clean "Failed to launch" from `open`.
+        assert!(super::layout::find_launch_target(&vdir).is_some());
+        match service.launch_game() {
+            Ok(()) => {}
+            Err(err) => {
+                assert!(
+                    err.contains("Failed to launch") || err.contains("open exited"),
+                    "unexpected launch error: {err}"
+                );
+            }
+        }
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        service.launch_game().unwrap();
+        let mut seen = false;
+        for _ in 0..100 {
+            if marker.exists() {
+                seen = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(seen, "launch marker was not created");
+    }
+
+    // Give async `open` a moment before deleting the temp bundle.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn launch_repairs_missing_execute_bit_on_macos_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root("launch-chmod");
+    let game_root = root.join("game");
+    let version = "1.0.0";
+    let vdir = version_dir(&game_root, version);
+    let macos_dir = vdir.join("Shadow Infection.app/Contents/MacOS");
+    std::fs::create_dir_all(&macos_dir).unwrap();
+    let script = macos_dir.join("ShadowInfection");
+    std::fs::write(&script, "#!/bin/sh\necho ok\n").unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o644);
+    std::fs::set_permissions(&script, perms).unwrap();
+    assert_eq!(
+        std::fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+        0
+    );
+
+    std::fs::write(
+        vdir.join("Shadow Infection.app/Contents/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>ShadowInfection</string>
+  <key>CFBundleIdentifier</key><string>com.test.shadowinfection</string>
+  <key>CFBundleName</key><string>Shadow Infection</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#,
+    )
+    .unwrap();
+    write_version_manifest(&vdir, version).unwrap();
+    write_active(&game_root, version).unwrap();
+
+    let downloader = Arc::new(FakeDownloader::ok(vec![]));
+    let extractor = Arc::new(FakeExtractor { fail: false });
+    let (service, state) = build_service(root.clone(), downloader, extractor);
+    state
+        .save(&InstallState {
+            version: Some(version.to_owned()),
+            download: None,
+            last_error: None,
+        })
+        .unwrap();
+
+    let _ = service.launch_game();
+    let mode = std::fs::metadata(&script).unwrap().permissions().mode();
+    assert_ne!(mode & 0o111, 0, "launch must restore execute bits, got {mode:#o}");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 struct BlockingDownloader {
     started: Mutex<Option<()>>,
     release: Mutex<bool>,

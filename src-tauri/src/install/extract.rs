@@ -97,6 +97,22 @@ fn remove_dir_all_robust(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Restore zip-stored Unix permissions (execute bits for game binaries).
+/// No-op on Windows and when the entry has no Unix mode metadata.
+fn apply_unix_mode(path: &Path, mode: Option<u32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(mode) = mode {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
+}
+
 fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Result<(), String> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
     let mut zip = ZipArchive::new(file).map_err(|e| format!("invalid zip archive: {e}"))?;
@@ -160,6 +176,9 @@ fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Resu
                     last_reported = extracted;
                 }
             }
+            // Close before chmod so mode sticks on the finished file.
+            drop(outfile);
+            apply_unix_mode(&out_path, entry.unix_mode());
         }
     }
 
@@ -286,6 +305,40 @@ mod tests {
             .extract_and_swap(&archive, &install, &NoopSink)
             .unwrap_err();
         assert!(err.contains("invalid zip"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restores_executable_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_dir("unix-mode");
+        let archive = root.join("game.zip");
+        let install = root.join("game");
+
+        let file = fs::File::create(&archive).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o755);
+        zip.start_file("bin/game", options).unwrap();
+        zip.write_all(b"#!/bin/sh\necho ok\n").unwrap();
+        zip.finish().unwrap();
+
+        ZipExtractor
+            .extract_and_swap(&archive, &install, &NoopSink)
+            .unwrap();
+
+        let mode = fs::metadata(install.join("bin/game"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_ne!(
+            mode & 0o111,
+            0,
+            "extracted binary must keep execute bits, got mode {mode:#o}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

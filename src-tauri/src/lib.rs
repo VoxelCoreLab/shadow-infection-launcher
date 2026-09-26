@@ -17,6 +17,7 @@ pub fn run() {
             install::commands::get_install_status,
             install::commands::start_install,
             install::commands::uninstall_game,
+            install::commands::launch_game,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

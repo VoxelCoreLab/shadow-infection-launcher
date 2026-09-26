@@ -48,6 +48,10 @@ export async function uninstallGame(): Promise<InstallStatus> {
   return invoke<InstallStatus>("uninstall_game");
 }
 
+export async function launchGame(): Promise<void> {
+  return invoke<void>("launch_game");
+}
+
 export async function listenInstallProgress(
   onProgress: (update: InstallProgressUpdate) => void,
 ): Promise<UnlistenFn> {
