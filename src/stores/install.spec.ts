@@ -10,7 +10,9 @@ const fetchDownloadForPlatform = vi.fn();
 const fetchLatestVersions = vi.fn();
 const getSettings = vi.fn();
 const getMyLicence = vi.fn();
-const detectGameDownloadPlatform = vi.fn(() => "macos" as const);
+const detectGameDownloadPlatform = vi.fn(
+  (..._args: unknown[]) => "macos" as const,
+);
 
 vi.mock("@/api/install", () => ({
   getInstallStatus: (...args: unknown[]) => getInstallStatus(...args),
