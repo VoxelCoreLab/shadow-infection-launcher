@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Shadow Infection",
+  "productName": "Shadow Infection Launcher",
   "version": "0.1.0",
   "identifier": "com.voxelcorelab.shadowinfection.launcher",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Shadow Infection",
+        "title": "Shadow Infection Launcher",
         "width": 1100,
         "height": 720,
         "minWidth": 900,
