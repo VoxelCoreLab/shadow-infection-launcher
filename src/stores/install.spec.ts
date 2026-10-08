@@ -46,7 +46,7 @@ vi.mock("@/api/shop", () => ({
   },
 }));
 
-import { useInstallStore } from "./install";
+import { LAUNCH_COOLDOWN_MS, useInstallStore } from "./install";
 
 describe("useInstallStore", () => {
   beforeEach(() => {
@@ -489,6 +489,7 @@ describe("useInstallStore", () => {
   });
 
   it("launches when installed and up to date", async () => {
+    vi.useFakeTimers();
     launchGame.mockResolvedValue(undefined);
 
     const store = useInstallStore();
@@ -503,6 +504,33 @@ describe("useInstallStore", () => {
     expect(ok).toBe(true);
     expect(launchGame).toHaveBeenCalledOnce();
     expect(store.error).toBeNull();
+    expect(store.launching).toBe(true);
+    expect(store.canPlay).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(LAUNCH_COOLDOWN_MS);
+    expect(store.launching).toBe(false);
+    expect(store.canPlay).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("blocks spam launches during the start cooldown", async () => {
+    vi.useFakeTimers();
+    launchGame.mockResolvedValue(undefined);
+
+    const store = useInstallStore();
+    store.phase = "installed";
+    store.localVersion = "1.0.0";
+    store.updateAvailable = false;
+
+    expect(await store.launch()).toBe(true);
+    expect(await store.launch()).toBe(false);
+    expect(launchGame).toHaveBeenCalledOnce();
+    expect(store.error).toMatch(/already starting/i);
+
+    await vi.advanceTimersByTimeAsync(LAUNCH_COOLDOWN_MS);
+    expect(await store.launch()).toBe(true);
+    expect(launchGame).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("blocks launch when not installed", async () => {

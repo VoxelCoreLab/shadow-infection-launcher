@@ -37,6 +37,9 @@ const showProgress = computed(
 );
 
 const statusLabel = computed(() => {
+  if (launching.value) {
+    return "Starting game";
+  }
   if (updateAvailable.value && !showProgress.value) {
     return "Update available";
   }
@@ -57,6 +60,9 @@ const statusLabel = computed(() => {
 });
 
 const statusColor = computed(() => {
+  if (launching.value) {
+    return "text-amber-400";
+  }
   if (updateAvailable.value && !showProgress.value) {
     return "text-amber-400";
   }

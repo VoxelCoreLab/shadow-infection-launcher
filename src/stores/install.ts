@@ -23,6 +23,9 @@ import { detectGameDownloadPlatform } from "@/lib/platform";
 const LICENCE_MISSING_MESSAGE =
   "No valid licence. Download is not available.";
 
+/** Keeps Play disabled briefly so spam-clicks cannot spawn many processes. */
+export const LAUNCH_COOLDOWN_MS = 1500;
+
 export const useInstallStore = defineStore("install", () => {
   const phase = ref<InstallPhase>("not_installed");
   const installPath = ref("");
@@ -41,6 +44,7 @@ export const useInstallStore = defineStore("install", () => {
   const error = ref<string | null>(null);
 
   let progressUnlisten: UnlistenFn | null = null;
+  let launchCooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
   const isDownloading = computed(() => phase.value === "downloading");
   const isExtracting = computed(() => phase.value === "extracting");
@@ -62,7 +66,7 @@ export const useInstallStore = defineStore("install", () => {
     () =>
       canStartInstall.value && (!isInstalled.value || updateAvailable.value),
   );
-  /** Play when installed and up to date (no install/update in progress). */
+  /** Play when installed and up to date (no install/update/launch in progress). */
   const canPlay = computed(
     () =>
       isInstalled.value &&
@@ -79,6 +83,13 @@ export const useInstallStore = defineStore("install", () => {
       phase.value !== "extracting" &&
       (phase.value === "installed" || phase.value === "failed"),
   );
+
+  function clearLaunchCooldown() {
+    if (launchCooldownTimer !== null) {
+      clearTimeout(launchCooldownTimer);
+      launchCooldownTimer = null;
+    }
+  }
 
   function applyStatus(status: InstallStatus) {
     phase.value = status.phase;
@@ -137,8 +148,7 @@ export const useInstallStore = defineStore("install", () => {
       return;
     }
     try {
-      const status = await getInstallStatus();
-      applyStatus(status);
+      applyStatus(await getInstallStatus());
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err);
     }
@@ -194,6 +204,8 @@ export const useInstallStore = defineStore("install", () => {
     }
 
     error.value = null;
+    clearLaunchCooldown();
+    launching.value = false;
     loading.value = true;
     phase.value = "downloading";
     progressPhase.value = "download";
@@ -251,6 +263,8 @@ export const useInstallStore = defineStore("install", () => {
       progressPhase.value = "download";
       remoteVersion.value = null;
       updateAvailable.value = false;
+      clearLaunchCooldown();
+      launching.value = false;
       return status.phase === "not_installed";
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err);
@@ -261,8 +275,12 @@ export const useInstallStore = defineStore("install", () => {
   }
 
   async function launch(): Promise<boolean> {
-    if (isBusy.value || launching.value) {
+    if (isBusy.value) {
       error.value = "Cannot launch while an installation is running.";
+      return false;
+    }
+    if (launching.value) {
+      error.value = "Game is already starting.";
       return false;
     }
     if (!isInstalled.value) {
@@ -275,15 +293,21 @@ export const useInstallStore = defineStore("install", () => {
     }
 
     error.value = null;
+    clearLaunchCooldown();
     launching.value = true;
     try {
       await launchGame();
+      // Hold the Starting… state briefly so double-clicks do not spawn extras.
+      // After the cooldown, Play is available again for another instance.
+      launchCooldownTimer = setTimeout(() => {
+        launching.value = false;
+        launchCooldownTimer = null;
+      }, LAUNCH_COOLDOWN_MS);
       return true;
     } catch (err) {
+      launching.value = false;
       error.value = err instanceof Error ? err.message : String(err);
       return false;
-    } finally {
-      launching.value = false;
     }
   }
 
