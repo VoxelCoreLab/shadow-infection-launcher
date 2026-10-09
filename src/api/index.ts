@@ -1,4 +1,8 @@
-export { patchNotesApi } from "./patch-notes";
+export {
+  patchNotesApi,
+  fetchPatchNotes,
+  fetchPatchNoteById,
+} from "./patch-notes";
 export { shopApi } from "./shop";
 export {
   fetchDownloadForPlatform,

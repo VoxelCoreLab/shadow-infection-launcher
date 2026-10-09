@@ -17,6 +17,52 @@ export interface RootResponseDto {
   docs: string;
 }
 
+export interface PatchNoteDto {
+  /** @format uuid */
+  id: string;
+  /** @example "1.2.3" */
+  version: string;
+  /** @example "Balance Update" */
+  title: string;
+  /** @example "Enemy damage reduced by 10%." */
+  content: string;
+  /** @format date-time */
+  createdAt: string;
+  /** @format date-time */
+  updatedAt: string;
+}
+
+export interface CreatePatchNoteDto {
+  /**
+   * Game version in Major.Minor.Patch format
+   * @example "1.2.3"
+   */
+  version: string;
+  /**
+   * @minLength 1
+   * @example "Balance Update"
+   */
+  title: string;
+  /**
+   * @minLength 1
+   * @example "Enemy damage reduced by 10%."
+   */
+  content: string;
+}
+
+export interface UpdatePatchNoteDto {
+  /**
+   * @minLength 1
+   * @example "Balance Update"
+   */
+  title?: string;
+  /**
+   * @minLength 1
+   * @example "Enemy damage reduced by 10%."
+   */
+  content?: string;
+}
+
 export type QueryParamsType = Record<string | number, any>;
 export type ResponseFormat = keyof Omit<Body, "body" | "bodyUsed">;
 
@@ -296,4 +342,198 @@ export class Api<
       format: "json",
       ...params,
     });
+
+  health = {
+    /**
+     * No description
+     *
+     * @tags Health
+     * @name HealthControllerCheck
+     * @request GET:/health
+     */
+    healthControllerCheck: (params: RequestParams = {}) =>
+      this.request<
+        {
+          /** @example "ok" */
+          status?: "ok" | "degraded";
+          /** @example {"database":{"status":"up","responseTime":12}} */
+          info?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          > | null;
+          /** @example {} */
+          error?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          > | null;
+          /** @example {"database":{"status":"up","responseTime":12}} */
+          details?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          >;
+        },
+        {
+          /** @example "error" */
+          status?: "error" | "shutting_down";
+          /** @example {"database":{"status":"up","responseTime":12}} */
+          info?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          > | null;
+          /** @example {"redis":{"status":"down","message":"Could not connect","responseTime":3005}} */
+          error?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          > | null;
+          /** @example {"database":{"status":"up","responseTime":12},"redis":{"status":"down","message":"Could not connect","responseTime":3005}} */
+          details?: Record<
+            string,
+            {
+              status: "up" | "degraded" | "down";
+              /** Time the health indicator took to respond, in ms */
+              responseTime?: number;
+              [key: string]: any;
+            }
+          >;
+        }
+      >({
+        path: `/health`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+  };
+  patchNotes = {
+    /**
+     * @description Returns all notes, or at most one note when filtered by version.
+     *
+     * @tags Patch Notes
+     * @name PatchNotesControllerFindAll
+     * @summary List patch notes
+     * @request GET:/patch-notes
+     */
+    patchNotesControllerFindAll: (
+      query?: {
+        /**
+         * Filter by game version (Major.Minor.Patch). At most one note.
+         * @example "1.2.3"
+         */
+        version?: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<PatchNoteDto[], any>({
+        path: `/patch-notes`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Patch Notes
+     * @name PatchNotesControllerCreate
+     * @summary Create a patch note
+     * @request POST:/patch-notes
+     * @secure
+     */
+    patchNotesControllerCreate: (
+      data: CreatePatchNoteDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<PatchNoteDto, void>({
+        path: `/patch-notes`,
+        method: "POST",
+        body: data,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Patch Notes
+     * @name PatchNotesControllerFindOne
+     * @summary Get one patch note by id
+     * @request GET:/patch-notes/{id}
+     */
+    patchNotesControllerFindOne: (id: string, params: RequestParams = {}) =>
+      this.request<PatchNoteDto, void>({
+        path: `/patch-notes/${id}`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Patch Notes
+     * @name PatchNotesControllerUpdate
+     * @summary Update a patch note
+     * @request PATCH:/patch-notes/{id}
+     * @secure
+     */
+    patchNotesControllerUpdate: (
+      id: string,
+      data: UpdatePatchNoteDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<PatchNoteDto, void>({
+        path: `/patch-notes/${id}`,
+        method: "PATCH",
+        body: data,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @tags Patch Notes
+     * @name PatchNotesControllerRemove
+     * @summary Delete a patch note
+     * @request DELETE:/patch-notes/{id}
+     * @secure
+     */
+    patchNotesControllerRemove: (id: string, params: RequestParams = {}) =>
+      this.request<PatchNoteDto, void>({
+        path: `/patch-notes/${id}`,
+        method: "DELETE",
+        secure: true,
+        format: "json",
+        ...params,
+      }),
+  };
 }
