@@ -2,11 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type InstallPhase =
-  | "not_installed"
-  | "downloading"
-  | "extracting"
-  | "installed"
-  | "failed";
+  "not_installed" | "downloading" | "extracting" | "installed" | "failed";
 
 export type ProgressPhase = "download" | "extract";
 

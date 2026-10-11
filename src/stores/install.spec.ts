@@ -10,8 +10,8 @@ const fetchDownloadForPlatform = vi.fn();
 const fetchLatestVersions = vi.fn();
 const getSettings = vi.fn();
 const getMyLicence = vi.fn();
-const detectGameDownloadPlatform = vi.fn(
-  (..._args: unknown[]) => "macos" as const,
+const detectGameDownloadPlatform = vi.fn<(...args: unknown[]) => "macos">(
+  () => "macos",
 );
 
 vi.mock("@/api/install", () => ({
@@ -154,12 +154,14 @@ describe("useInstallStore", () => {
   });
 
   it("applies progress events", async () => {
-    let handler: ((u: {
-      downloaded: number;
-      total: number | null;
-      percent: number | null;
-      phase: "download" | "extract";
-    }) => void) | null = null;
+    let handler:
+      | ((u: {
+          downloaded: number;
+          total: number | null;
+          percent: number | null;
+          phase: "download" | "extract";
+        }) => void)
+      | null = null;
     listenInstallProgress.mockImplementation(async (cb) => {
       handler = cb;
       return () => undefined;
@@ -194,12 +196,14 @@ describe("useInstallStore", () => {
   });
 
   it("switches to extracting on extract progress events", async () => {
-    let handler: ((u: {
-      downloaded: number;
-      total: number | null;
-      percent: number | null;
-      phase: "download" | "extract";
-    }) => void) | null = null;
+    let handler:
+      | ((u: {
+          downloaded: number;
+          total: number | null;
+          percent: number | null;
+          phase: "download" | "extract";
+        }) => void)
+      | null = null;
     listenInstallProgress.mockImplementation(async (cb) => {
       handler = cb;
       return () => undefined;

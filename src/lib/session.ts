@@ -1,13 +1,6 @@
-const TOKEN_ENDPOINT = "https://securetoken.googleapis.com/v1/token";
-export const FALLBACK_TTL_MS = 55 * 60 * 1000;
+import { invoke } from "@tauri-apps/api/core";
 
-const INVALID_TOKEN_MARKERS = [
-  "INVALID_REFRESH_TOKEN",
-  "INVALID_GRANT",
-  "TOKEN_EXPIRED",
-  "USER_DISABLED",
-  "USER_NOT_FOUND",
-];
+export const FALLBACK_TTL_MS = 55 * 60 * 1000;
 
 export type SessionErrorKind = "invalid_token" | "transient";
 
@@ -27,7 +20,6 @@ export function isInvalidRefreshTokenError(error: unknown): boolean {
 
 export type SessionTokens = {
   idToken: string;
-  refreshToken: string;
   expiresAt: number;
   uid: string;
   email: string | null;
@@ -75,78 +67,34 @@ export function expiresAtFromIdToken(idToken: string): number {
   return Date.now() + FALLBACK_TTL_MS;
 }
 
-function errorMessageFromBody(body: unknown): string {
-  if (typeof body !== "object" || body === null || !("error" in body)) {
-    return "";
-  }
+type RefreshedSession = {
+  id_token: string;
+  expires_in: number | null;
+  user_id: string | null;
+};
 
-  const { error } = body as { error: unknown };
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const { message } = error as { message: unknown };
-    return typeof message === "string" ? message : "";
-  }
-
-  return "";
-}
-
-function sessionErrorFromHttpBody(body: unknown): SessionError {
-  const message = errorMessageFromBody(body);
-  const normalized = message.toUpperCase();
-  const invalidToken = INVALID_TOKEN_MARKERS.some((marker) =>
-    normalized.includes(marker),
-  );
-
-  if (invalidToken) {
-    return new SessionError("invalid_token");
-  }
-
-  return new SessionError("transient");
-}
-
-export async function exchangeRefreshToken(
-  refreshToken: string,
+/**
+ * Exchanges the refresh token stored in the OS vault for a fresh ID token.
+ * The exchange (and token rotation) happens in Rust, so the long-lived
+ * refresh token never enters the webview. Resolves to null when no session
+ * is stored; a rejected token is removed from the vault by the backend.
+ */
+export async function refreshStoredSession(
   apiKey: string,
-): Promise<SessionTokens> {
-  let response: Response;
+): Promise<SessionTokens | null> {
+  let data: RefreshedSession | null;
   try {
-    response = await fetch(
-      `${TOKEN_ENDPOINT}?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-        }),
-      },
+    data = await invoke<RefreshedSession | null>("refresh_session", {
+      apiKey,
+    });
+  } catch (err) {
+    throw new SessionError(
+      err === "invalid_token" ? "invalid_token" : "transient",
     );
-  } catch {
-    throw new SessionError("transient");
   }
 
-  if (!response.ok) {
-    let body: unknown = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    throw sessionErrorFromHttpBody(body);
-  }
-
-  const data = (await response.json()) as {
-    id_token?: string;
-    refresh_token?: string;
-    expires_in?: string;
-    user_id?: string;
-  };
-
-  if (!data.id_token || !data.refresh_token) {
-    throw new SessionError("transient");
+  if (!data) {
+    return null;
   }
 
   const claims = decodeIdTokenClaims(data.id_token);
@@ -155,14 +103,13 @@ export async function exchangeRefreshToken(
     throw new SessionError("transient");
   }
 
-  const expiresInSec = Number(data.expires_in);
-  const expiresAt = Number.isFinite(expiresInSec)
-    ? Date.now() + expiresInSec * 1000
-    : expiresAtFromIdToken(data.id_token);
+  const expiresAt =
+    typeof data.expires_in === "number"
+      ? Date.now() + data.expires_in * 1000
+      : expiresAtFromIdToken(data.id_token);
 
   return {
     idToken: data.id_token,
-    refreshToken: data.refresh_token,
     expiresAt,
     uid,
     email: claims.email,

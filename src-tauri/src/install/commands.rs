@@ -1,11 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 
-use super::default_paths::{default_install_dir, default_install_path_string};
-use super::download::ReqwestDownloader;
+use super::default_paths::{
+    dedicated_install_dir, default_install_dir, default_install_path_string,
+};
+use super::download::{validate_download_url, ReqwestDownloader};
 use super::extract::ZipExtractor;
 use super::paths::SettingsPathProvider;
 use super::progress::TauriProgressSink;
@@ -48,10 +50,11 @@ fn ensure_runtime(app: &AppHandle) -> Result<(), String> {
 
     let settings: Arc<dyn SettingsStore> =
         Arc::new(FileSettingsStore::new(&data_root, &default_install));
-    let paths: Arc<dyn PathProvider> =
-        Arc::new(SettingsPathProvider::new(Arc::clone(&settings), &default_install));
-    let state_store: Arc<dyn InstallStateStore> =
-        Arc::new(FileInstallStateStore::new(&data_root));
+    let paths: Arc<dyn PathProvider> = Arc::new(SettingsPathProvider::new(
+        Arc::clone(&settings),
+        &default_install,
+    ));
+    let state_store: Arc<dyn InstallStateStore> = Arc::new(FileInstallStateStore::new(&data_root));
     let downloader: Arc<dyn HttpDownloader> = Arc::new(ReqwestDownloader::new()?);
     let extractor: Arc<dyn ArchiveExtractor> = Arc::new(ZipExtractor);
     let service = Arc::new(InstallService::new(
@@ -93,7 +96,10 @@ pub fn get_default_install_path() -> String {
 }
 
 #[tauri::command]
-pub fn save_settings(app: AppHandle, settings: LauncherSettings) -> Result<LauncherSettings, String> {
+pub fn save_settings(
+    app: AppHandle,
+    settings: LauncherSettings,
+) -> Result<LauncherSettings, String> {
     with_runtime(&app, |rt| {
         if rt.service.is_busy()? {
             return Err("cannot change settings while an installation is running".into());
@@ -104,6 +110,13 @@ pub fn save_settings(app: AppHandle, settings: LauncherSettings) -> Result<Launc
         validate_settings(&normalized)?;
 
         let current = rt.settings.load()?;
+        if current.install_path.trim() != normalized.install_path {
+            // A newly picked folder always gets its own game subfolder so
+            // install/uninstall never share a root with unrelated data.
+            normalized.install_path = dedicated_install_dir(Path::new(&normalized.install_path))
+                .display()
+                .to_string();
+        }
         if current.install_path.trim() != normalized.install_path {
             let state = rt.service.install_state()?;
             if state.version.is_some() || state.download.is_some() {
@@ -146,6 +159,7 @@ pub async fn start_install(
     if url.trim().is_empty() {
         return Err("download url must not be empty".into());
     }
+    validate_download_url(url.trim())?;
     if version.trim().is_empty() {
         return Err("version must not be empty".into());
     }

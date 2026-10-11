@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use super::layout::{
     cleanup_old_installs, find_launch_target, get_verified_installed_version,
-    manifest_dir_for_target, resolve_active_dir, verify_install, version_dir, write_active,
-    write_version_manifest,
+    manifest_dir_for_target, remove_install, resolve_active_dir, validate_version, verify_install,
+    version_dir, write_active, write_version_manifest, write_version_marker,
 };
 use super::traits::{
     ArchiveExtractor, DownloadProgress, HttpDownloader, InstallPhase, InstallState,
@@ -84,6 +84,9 @@ impl InstallService {
         version: &str,
         progress: &dyn ProgressSink,
     ) -> Result<InstallStatusDto, String> {
+        // The version becomes a folder and temp file name; reject anything that
+        // could escape the install root before touching the filesystem.
+        validate_version(version)?;
         {
             let mut busy = self.busy.lock().map_err(|e| e.to_string())?;
             if busy.is_some() {
@@ -174,9 +177,8 @@ impl InstallService {
 
         if let Some(expected) = expected_total_for_check {
             if downloaded != expected {
-                let err = format!(
-                    "content length mismatch: expected {expected} bytes, got {downloaded}"
-                );
+                let err =
+                    format!("content length mismatch: expected {expected} bytes, got {downloaded}");
                 self.persist_error(&err)?;
                 return Err(err);
             }
@@ -210,6 +212,7 @@ impl InstallService {
             })?;
             let manifest_dir = manifest_dir_for_target(&launch_target);
             write_version_manifest(&manifest_dir, version)?;
+            write_version_marker(&target_dir)?;
             verify_install(&target_dir, version)?;
             write_active(&install_root, version)?;
             cleanup_old_installs(&install_root, version)?;
@@ -234,12 +237,7 @@ impl InstallService {
         Ok(())
     }
 
-    fn resume_plan(
-        &self,
-        state: &InstallState,
-        version: &str,
-        temp_file: &Path,
-    ) -> ResumePlan {
+    fn resume_plan(&self, state: &InstallState, version: &str, temp_file: &Path) -> ResumePlan {
         let Some(download) = &state.download else {
             return ResumePlan::NeedDownload {
                 resume_from: 0,
@@ -259,9 +257,7 @@ impl InstallService {
                 expected_total: Some(download.size).filter(|s| *s > 0),
             };
         }
-        let meta_len = std::fs::metadata(temp_file)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let meta_len = std::fs::metadata(temp_file).map(|m| m.len()).unwrap_or(0);
         if download.size > 0 && meta_len > download.size {
             let _ = std::fs::remove_file(temp_file);
             return ResumePlan::NeedDownload {
@@ -320,9 +316,7 @@ impl InstallService {
         }
 
         let install_path = self.paths.install_path()?;
-        if install_path.exists() {
-            std::fs::remove_dir_all(&install_path).map_err(|e| e.to_string())?;
-        }
+        remove_install(&install_path)?;
 
         self.state_store.save(&InstallState::default())?;
         self.status()
@@ -358,9 +352,7 @@ fn spawn_game_process(target: &Path, game_dir: &Path) -> Result<(), String> {
             .status()
             .map_err(|e| format!("Failed to launch game: {e}"))?;
         if !status.success() {
-            return Err(format!(
-                "Failed to launch game: open exited with {status}"
-            ));
+            return Err(format!("Failed to launch game: open exited with {status}"));
         }
         Ok(())
     }
@@ -411,12 +403,8 @@ fn ensure_macos_app_executable(app_bundle: &Path) -> Result<(), String> {
         ));
     }
 
-    let entries = std::fs::read_dir(&macos_dir).map_err(|e| {
-        format!(
-            "Cannot read {}: {e}",
-            macos_dir.display()
-        )
-    })?;
+    let entries = std::fs::read_dir(&macos_dir)
+        .map_err(|e| format!("Cannot read {}: {e}", macos_dir.display()))?;
 
     let mut found = false;
     for entry in entries.flatten() {

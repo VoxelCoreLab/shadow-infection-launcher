@@ -4,9 +4,9 @@ description = "Allows storing the Firebase refresh token in the OS credential st
 commands.allow = ["store_refresh_token"]
 
 [[permission]]
-identifier = "allow-get-refresh-token"
-description = "Allows reading the Firebase refresh token from the OS credential store."
-commands.allow = ["get_refresh_token"]
+identifier = "allow-refresh-session"
+description = "Allows exchanging the stored refresh token for a fresh ID token. The refresh token itself is never returned."
+commands.allow = ["refresh_session"]
 
 [[permission]]
 identifier = "allow-clear-refresh-token"

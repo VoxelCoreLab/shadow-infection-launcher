@@ -12,7 +12,7 @@
     "dialog:default",
     "dialog:allow-open",
     "allow-store-refresh-token",
-    "allow-get-refresh-token",
+    "allow-refresh-session",
     "allow-clear-refresh-token",
     "allow-get-settings",
     "allow-save-settings",

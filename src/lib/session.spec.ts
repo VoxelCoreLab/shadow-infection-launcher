@@ -1,10 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const invoke = vi.fn();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invoke(...args),
+}));
+
 import {
   decodeIdTokenClaims,
-  exchangeRefreshToken,
   expiresAtFromIdToken,
   FALLBACK_TTL_MS,
   isInvalidRefreshTokenError,
+  refreshStoredSession,
   SessionError,
 } from "./session";
 
@@ -62,119 +69,70 @@ describe("expiresAtFromIdToken", () => {
   });
 });
 
-describe("exchangeRefreshToken", () => {
-  const fetchMock = vi.fn();
-
+describe("refreshStoredSession", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
+    invoke.mockReset();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("returns session tokens from a successful exchange", async () => {
+  it("returns session tokens from the backend exchange", async () => {
     const idToken = encodeJwt({ sub: "uid-1", email: "a@example.com" });
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        id_token: idToken,
-        refresh_token: "refresh-2",
-        expires_in: "3600",
-        user_id: "uid-1",
-      }),
+    invoke.mockResolvedValue({
+      id_token: idToken,
+      expires_in: 3600,
+      user_id: "uid-1",
     });
 
     const before = Date.now();
-    const session = await exchangeRefreshToken("refresh-1", "api-key");
+    const session = await refreshStoredSession("api-key");
     const after = Date.now();
 
+    expect(invoke).toHaveBeenCalledWith("refresh_session", {
+      apiKey: "api-key",
+    });
     expect(session).toMatchObject({
       idToken,
-      refreshToken: "refresh-2",
       uid: "uid-1",
       email: "a@example.com",
     });
-    expect(session.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000);
-    expect(session.expiresAt).toBeLessThanOrEqual(after + 3_600_000);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://securetoken.googleapis.com/v1/token?key=api-key",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(session).not.toHaveProperty("refreshToken");
+    expect(session!.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(session!.expiresAt).toBeLessThanOrEqual(after + 3_600_000);
   });
 
   it("uses JWT exp when expires_in is missing", async () => {
-    const idToken = encodeJwt({
-      sub: "uid-1",
-      exp: 1_800_000_000,
-    });
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        id_token: idToken,
-        refresh_token: "refresh-2",
-      }),
+    const idToken = encodeJwt({ sub: "uid-1", exp: 1_800_000_000 });
+    invoke.mockResolvedValue({
+      id_token: idToken,
+      expires_in: null,
+      user_id: null,
     });
 
-    const session = await exchangeRefreshToken("refresh-1", "api-key");
-    expect(session.expiresAt).toBe(1_800_000_000_000);
+    const session = await refreshStoredSession("api-key");
+    expect(session?.uid).toBe("uid-1");
+    expect(session?.expiresAt).toBe(1_800_000_000_000);
   });
 
-  it("marks INVALID_REFRESH_TOKEN as invalid_token", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({
-        error: { message: "INVALID_REFRESH_TOKEN" },
-      }),
-    });
+  it("returns null when no session is stored", async () => {
+    invoke.mockResolvedValue(null);
+    expect(await refreshStoredSession("api-key")).toBeNull();
+  });
 
-    await expect(exchangeRefreshToken("bad", "api-key")).rejects.toSatisfy(
+  it("maps the backend invalid_token error", async () => {
+    invoke.mockRejectedValue("invalid_token");
+    await expect(refreshStoredSession("api-key")).rejects.toSatisfy(
       (err: unknown) => isInvalidRefreshTokenError(err),
     );
   });
 
-  it("marks INVALID_GRANT as invalid_token", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({
-        error: { message: "invalid_grant" },
-      }),
-    });
-
-    await expect(exchangeRefreshToken("bad", "api-key")).rejects.toSatisfy(
-      (err: unknown) => isInvalidRefreshTokenError(err),
+  it("maps any other backend failure to transient", async () => {
+    invoke.mockRejectedValue("transient");
+    await expect(refreshStoredSession("api-key")).rejects.toSatisfy(
+      (err: unknown) => err instanceof SessionError && err.kind === "transient",
     );
-  });
 
-  it("marks a network failure as transient", async () => {
-    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-
-    try {
-      await exchangeRefreshToken("refresh-1", "api-key");
-      throw new Error("expected throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SessionError);
-      expect((err as SessionError).kind).toBe("transient");
-      expect(isInvalidRefreshTokenError(err)).toBe(false);
-    }
-  });
-
-  it("marks a 5xx response as transient", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: { message: "UNAVAILABLE" } }),
-    });
-
-    try {
-      await exchangeRefreshToken("refresh-1", "api-key");
-      throw new Error("expected throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SessionError);
-      expect((err as SessionError).kind).toBe("transient");
-    }
+    invoke.mockRejectedValue(new Error("IPC unavailable"));
+    await expect(refreshStoredSession("api-key")).rejects.toSatisfy(
+      (err: unknown) => !isInvalidRefreshTokenError(err),
+    );
   });
 });

@@ -1,4 +1,21 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Leaf folder the game always lives in, so a picked parent like `D:\Games`
+/// is never used as the install root itself.
+pub const INSTALL_DIR_NAME: &str = "ShadowInfection";
+
+/// `path` if it already is a `ShadowInfection` folder, else that subfolder.
+pub fn dedicated_install_dir(path: &Path) -> PathBuf {
+    let is_dedicated = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(INSTALL_DIR_NAME));
+    if is_dedicated {
+        path.to_path_buf()
+    } else {
+        path.join(INSTALL_DIR_NAME)
+    }
+}
 
 /// Default directory for the **game** install (not launcher settings).
 ///
@@ -17,8 +34,8 @@ fn default_install_dir_inner() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // …/src-tauri
     manifest_dir
         .parent()
-        .map(|repo| repo.join("tmp").join("ShadowInfection"))
-        .unwrap_or_else(|| manifest_dir.join("tmp").join("ShadowInfection"))
+        .map(|repo| repo.join("tmp").join(INSTALL_DIR_NAME))
+        .unwrap_or_else(|| manifest_dir.join("tmp").join(INSTALL_DIR_NAME))
 }
 
 #[cfg(not(debug_assertions))]
@@ -35,12 +52,27 @@ fn default_install_dir_inner() -> PathBuf {
     let base = dirs::data_local_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/home")));
 
-    base.join("ShadowInfection")
+    base.join(INSTALL_DIR_NAME)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dedicated_dir_appends_subfolder_to_shared_parent() {
+        let picked = PathBuf::from("games");
+        assert_eq!(
+            dedicated_install_dir(&picked),
+            picked.join(INSTALL_DIR_NAME)
+        );
+    }
+
+    #[test]
+    fn dedicated_dir_keeps_existing_game_folder() {
+        let picked = PathBuf::from("games").join("shadowinfection");
+        assert_eq!(dedicated_install_dir(&picked), picked);
+    }
 
     #[test]
     #[cfg(debug_assertions)]
@@ -56,7 +88,9 @@ mod tests {
             Some("ShadowInfection")
         );
         assert_eq!(
-            path.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()),
+            path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str()),
             Some("tmp")
         );
     }

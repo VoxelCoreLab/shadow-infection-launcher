@@ -2,11 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::service::InstallService;
 use super::traits::{
     ArchiveExtractor, HttpDownloader, InstallState, InstallStateStore, PathProvider, ProgressPhase,
     ProgressSink, ProgressUpdate,
 };
-use super::service::InstallService;
 
 #[derive(Default)]
 pub struct MemoryStateStore {

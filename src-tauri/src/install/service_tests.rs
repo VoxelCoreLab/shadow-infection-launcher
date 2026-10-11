@@ -2,12 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::layout::{
-    read_active_version, version_dir, write_active, write_version_manifest,
-};
-use super::test_fakes::{
-    build_service, FakeDownloader, FakeExtractor, RecordingProgressSink,
-};
+use super::layout::{read_active_version, version_dir, write_active, write_version_manifest};
+use super::test_fakes::{build_service, FakeDownloader, FakeExtractor, RecordingProgressSink};
 use super::traits::{
     DownloadProgress, HttpDownloader, InstallPhase, InstallState, InstallStateStore, ProgressSink,
 };
@@ -64,6 +60,34 @@ fn happy_path_installs_and_stores_version() {
 }
 
 #[test]
+fn rejects_traversal_version_without_touching_disk() {
+    let root = temp_root("bad-version");
+    let sentinel = root.join("keep.txt");
+    std::fs::write(&sentinel, b"user data").unwrap();
+    let downloader = Arc::new(FakeDownloader::ok(b"zip-bytes".to_vec()));
+    let (service, _state) = build_service(
+        root.clone(),
+        Arc::clone(&downloader) as Arc<dyn HttpDownloader>,
+        Arc::new(FakeExtractor { fail: false }),
+    );
+
+    for version in ["..", ".", "../evil", "1.0/../.."] {
+        let err = service
+            .install(
+                "https://example.test/game.zip",
+                version,
+                &RecordingProgressSink::default(),
+            )
+            .unwrap_err();
+        assert!(err.contains("invalid game version"), "{err}");
+    }
+
+    assert_eq!(*downloader.call_count.lock().unwrap(), 0);
+    assert!(sentinel.exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn status_without_install_is_not_installed() {
     let root = temp_root("empty");
     let downloader = Arc::new(FakeDownloader::ok(vec![]));
@@ -83,7 +107,11 @@ fn download_http_error_does_not_extract() {
     let (service, _) = build_service(root.clone(), downloader, extractor);
 
     let err = service
-        .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap_err();
     assert!(err.contains("http download failed"));
     assert!(!root.join("game").exists());
@@ -102,7 +130,11 @@ fn content_length_mismatch_fails() {
     let (service, _) = build_service(root.clone(), downloader, extractor);
 
     let err = service
-        .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap_err();
     assert!(err.contains("content length mismatch"));
     assert!(!version_payload_exists(&root.join("game"), "1.0.0"));
@@ -117,7 +149,11 @@ fn extractor_failure_keeps_uninstalled() {
     let (service, _) = build_service(root.clone(), downloader, extractor);
 
     let err = service
-        .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap_err();
     assert!(err.contains("extract failed"));
     assert_eq!(service.status().unwrap().phase, InstallPhase::Failed);
@@ -210,7 +246,11 @@ fn resume_uses_range_offset_when_state_matches() {
         .unwrap();
 
     service
-        .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap();
 
     assert_eq!(*downloader.last_resume_from.lock().unwrap(), Some(4));
@@ -310,10 +350,7 @@ fn download_progress_preserves_installed_version() {
 
     *blocker.release.lock().unwrap() = true;
     handle.join().unwrap();
-    assert_eq!(
-        state.load().unwrap().version.as_deref(),
-        Some("2.0.0")
-    );
+    assert_eq!(state.load().unwrap().version.as_deref(), Some("2.0.0"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -345,7 +382,11 @@ fn resume_mismatch_version_starts_from_zero() {
         .unwrap();
 
     service
-        .install("https://example.test/game.zip", "2.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "2.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap();
 
     assert_eq!(*downloader.last_resume_from.lock().unwrap(), Some(0));
@@ -388,7 +429,11 @@ fn rejects_parallel_second_start() {
     assert!(blocker.started.lock().unwrap().is_some());
 
     let err = service
-        .install("https://example.test/game.zip", "1.0.0", &RecordingProgressSink::default())
+        .install(
+            "https://example.test/game.zip",
+            "1.0.0",
+            &RecordingProgressSink::default(),
+        )
         .unwrap_err();
     assert!(err.contains("already running"));
 
@@ -673,7 +718,11 @@ fn launch_repairs_missing_execute_bit_on_macos_binary() {
 
     let _ = service.launch_game();
     let mode = std::fs::metadata(&script).unwrap().permissions().mode();
-    assert_ne!(mode & 0o111, 0, "launch must restore execute bits, got {mode:#o}");
+    assert_ne!(
+        mode & 0o111,
+        0,
+        "launch must restore execute bits, got {mode:#o}"
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

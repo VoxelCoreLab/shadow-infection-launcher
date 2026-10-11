@@ -23,7 +23,11 @@ const pathLocked = computed(
 );
 
 const settingsBusy = computed(
-  () => settings.loading || settings.saving || install.uninstalling || install.isBusy,
+  () =>
+    settings.loading ||
+    settings.saving ||
+    install.uninstalling ||
+    install.isBusy,
 );
 
 watch(
@@ -177,9 +181,7 @@ async function handleUninstall() {
       >
         <div>
           <p class="font-medium">Automatic updates</p>
-          <p class="text-sm text-zinc-500">
-            Apply new versions on launch
-          </p>
+          <p class="text-sm text-zinc-500">Apply new versions on launch</p>
         </div>
         <button
           type="button"

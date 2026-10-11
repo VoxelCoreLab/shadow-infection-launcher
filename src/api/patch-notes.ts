@@ -23,7 +23,6 @@ export async function fetchPatchNotes(
 
 /** Public detail by UUID. */
 export async function fetchPatchNoteById(id: string): Promise<PatchNoteDto> {
-  const res =
-    await patchNotesApi.patchNotes.patchNotesControllerFindOne(id);
+  const res = await patchNotesApi.patchNotes.patchNotesControllerFindOne(id);
   return res.data;
 }

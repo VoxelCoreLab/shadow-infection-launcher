@@ -20,8 +20,7 @@ import { getSettings } from "@/api/settings";
 import { shopApi } from "@/api/shop";
 import { detectGameDownloadPlatform } from "@/lib/platform";
 
-const LICENCE_MISSING_MESSAGE =
-  "No valid licence. Download is not available.";
+const LICENCE_MISSING_MESSAGE = "No valid licence. Download is not available.";
 
 /** Keeps Play disabled briefly so spam-clicks cannot spawn many processes. */
 export const LAUNCH_COOLDOWN_MS = 1500;
@@ -173,11 +172,7 @@ export const useInstallStore = defineStore("install", () => {
       remoteVersion.value = latest[platform] ?? null;
       recomputeUpdateAvailable();
 
-      if (
-        options.applyAuto &&
-        updateAvailable.value &&
-        canStartInstall.value
-      ) {
+      if (options.applyAuto && updateAvailable.value && canStartInstall.value) {
         const settings = await getSettings();
         if (settings.update_mode === "auto") {
           return startGameInstall();

@@ -5,7 +5,7 @@ import { SessionError } from "@/lib/session";
 const signInWithEmailAndPassword = vi.fn();
 const signOut = vi.fn();
 const invoke = vi.fn();
-const exchangeRefreshToken = vi.fn();
+const refreshStoredSession = vi.fn();
 
 vi.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: (...args: unknown[]) =>
@@ -27,7 +27,7 @@ vi.mock("@/lib/session", async () => {
     await vi.importActual<typeof import("@/lib/session")>("@/lib/session");
   return {
     ...actual,
-    exchangeRefreshToken: (...args: unknown[]) => exchangeRefreshToken(...args),
+    refreshStoredSession: (...args: unknown[]) => refreshStoredSession(...args),
   };
 });
 
@@ -59,6 +59,7 @@ describe("useAuthStore", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     invoke.mockResolvedValue(null);
+    refreshStoredSession.mockResolvedValue(null);
   });
 
   it("logs in and stores the refresh token", async () => {
@@ -84,7 +85,34 @@ describe("useAuthStore", () => {
     expect(auth.isLoggedIn).toBe(true);
     expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
     expect(await auth.getIdToken()).toBe(token);
-    expect(exchangeRefreshToken).not.toHaveBeenCalled();
+    expect(refreshStoredSession).not.toHaveBeenCalled();
+  });
+
+  it("drops the SDK's in-memory refresh token after storing it", async () => {
+    const order: string[] = [];
+    signInWithEmailAndPassword.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi
+          .fn()
+          .mockResolvedValue(idTokenFor("uid-1", "a@example.com")),
+      },
+    });
+    invoke.mockImplementation(async (command: string) => {
+      order.push(command);
+    });
+    signOut.mockImplementation(async () => {
+      order.push("signOut");
+    });
+
+    const auth = useAuthStore();
+    await auth.login("a@example.com", "secret");
+
+    expect(order).toEqual(["store_refresh_token", "signOut"]);
+    expect(auth.isLoggedIn).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("get_refresh_token");
   });
 
   it("maps invalid credentials to a single error message", async () => {
@@ -113,15 +141,8 @@ describe("useAuthStore", () => {
   });
 
   it("restores a session from the vault", async () => {
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockResolvedValue({
+    refreshStoredSession.mockResolvedValue({
       idToken: "id-token-2",
-      refreshToken: "refresh-2",
       expiresAt: Date.now() + 3_600_000,
       uid: "uid-1",
       email: "a@example.com",
@@ -133,9 +154,7 @@ describe("useAuthStore", () => {
     expect(auth.ready).toBe(true);
     expect(auth.isLoggedIn).toBe(true);
     expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
-    expect(invoke).toHaveBeenCalledWith("store_refresh_token", {
-      token: "refresh-2",
-    });
+    expect(refreshStoredSession).toHaveBeenCalledWith("test-api-key");
     expect(await auth.getIdToken()).toBe("id-token-2");
   });
 
@@ -149,13 +168,7 @@ describe("useAuthStore", () => {
   });
 
   it("does not clear the vault when session restore fails transiently", async () => {
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockRejectedValue(new SessionError("transient"));
+    refreshStoredSession.mockRejectedValue(new SessionError("transient"));
 
     const auth = useAuthStore();
     await auth.initialize();
@@ -165,20 +178,15 @@ describe("useAuthStore", () => {
     expect(invoke).not.toHaveBeenCalledWith("clear_refresh_token");
   });
 
-  it("clears the vault when the stored refresh token is invalid", async () => {
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockRejectedValue(new SessionError("invalid_token"));
+  it("stays logged out when the stored refresh token is invalid", async () => {
+    // The backend removes the rejected token from the vault itself.
+    refreshStoredSession.mockRejectedValue(new SessionError("invalid_token"));
 
     const auth = useAuthStore();
     await auth.initialize();
 
+    expect(auth.ready).toBe(true);
     expect(auth.isLoggedIn).toBe(false);
-    expect(invoke).toHaveBeenCalledWith("clear_refresh_token");
   });
 
   it("clears the session and vault on logout", async () => {
@@ -231,7 +239,8 @@ describe("useAuthStore", () => {
     expect(auth.isLoggedIn).toBe(true);
     expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
     expect(auth.error).toBe("Could not sign out. Please try again.");
-    expect(signOut).not.toHaveBeenCalled();
+    // Only the post-login SDK sign-out; logout aborted before reaching it.
+    expect(signOut).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes an expired id token", async () => {
@@ -244,15 +253,8 @@ describe("useAuthStore", () => {
         getIdToken: vi.fn().mockResolvedValue(expired),
       },
     });
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockResolvedValue({
+    refreshStoredSession.mockResolvedValue({
       idToken: "id-token-fresh",
-      refreshToken: "refresh-2",
       expiresAt: Date.now() + 3_600_000,
       uid: "uid-1",
       email: "a@example.com",
@@ -262,10 +264,7 @@ describe("useAuthStore", () => {
     await auth.login("a@example.com", "secret");
 
     expect(await auth.getIdToken()).toBe("id-token-fresh");
-    expect(exchangeRefreshToken).toHaveBeenCalledWith(
-      "refresh-1",
-      "test-api-key",
-    );
+    expect(refreshStoredSession).toHaveBeenCalledWith("test-api-key");
   });
 
   it("keeps the vault when a refresh fails transiently", async () => {
@@ -278,13 +277,7 @@ describe("useAuthStore", () => {
         getIdToken: vi.fn().mockResolvedValue(expired),
       },
     });
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockRejectedValue(new SessionError("transient"));
+    refreshStoredSession.mockRejectedValue(new SessionError("transient"));
 
     const auth = useAuthStore();
     await auth.login("a@example.com", "secret");
@@ -304,36 +297,23 @@ describe("useAuthStore", () => {
         getIdToken: vi.fn().mockResolvedValue(expired),
       },
     });
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
-    exchangeRefreshToken.mockRejectedValue(new SessionError("invalid_token"));
+    refreshStoredSession.mockRejectedValue(new SessionError("invalid_token"));
 
     const auth = useAuthStore();
     await auth.login("a@example.com", "secret");
 
     expect(await auth.getIdToken()).toBeNull();
     expect(auth.isLoggedIn).toBe(false);
-    expect(invoke).toHaveBeenCalledWith("clear_refresh_token");
   });
 
   it("shares an in-flight refresh across concurrent getIdToken calls", async () => {
     let resolveExchange: ((value: unknown) => void) | undefined;
-    exchangeRefreshToken.mockImplementation(
+    refreshStoredSession.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveExchange = resolve;
         }),
     );
-    invoke.mockImplementation(async (command: string) => {
-      if (command === "get_refresh_token") {
-        return "refresh-1";
-      }
-      return undefined;
-    });
 
     const auth = useAuthStore();
     const first = auth.getIdToken();
@@ -342,11 +322,10 @@ describe("useAuthStore", () => {
     await vi.waitFor(() => {
       expect(resolveExchange).toBeTypeOf("function");
     });
-    expect(exchangeRefreshToken).toHaveBeenCalledTimes(1);
+    expect(refreshStoredSession).toHaveBeenCalledTimes(1);
 
     resolveExchange?.({
       idToken: "id-token-3",
-      refreshToken: "refresh-2",
       expiresAt: Date.now() + 3_600_000,
       uid: "uid-1",
       email: "a@example.com",
@@ -354,6 +333,6 @@ describe("useAuthStore", () => {
 
     expect(await first).toBe("id-token-3");
     expect(await second).toBe("id-token-3");
-    expect(exchangeRefreshToken).toHaveBeenCalledTimes(1);
+    expect(refreshStoredSession).toHaveBeenCalledTimes(1);
   });
 });

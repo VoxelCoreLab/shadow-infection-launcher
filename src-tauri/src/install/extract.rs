@@ -33,22 +33,27 @@ impl ArchiveExtractor for ZipExtractor {
 /// Wipe `dir` if it exists, then recreate it empty.
 fn reset_dir(dir: &Path) -> Result<(), String> {
     if dir.exists() {
-        remove_dir_all_robust(dir)
-            .map_err(|e| format!("Cannot clear {}: {e}", dir.display()))?;
+        remove_dir_all_robust(dir).map_err(|e| format!("Cannot clear {}: {e}", dir.display()))?;
     }
     fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))
 }
 
+/// Windows refuses to delete read-only files. Unix doesn't care (deletion is
+/// governed by the parent dir), and `set_readonly(false)` there would make the
+/// file world-writable, so this is Windows-only.
+#[cfg(windows)]
 fn clear_readonly(path: &Path) {
     if let Ok(metadata) = fs::metadata(path) {
         let mut perms = metadata.permissions();
         if perms.readonly() {
+            #[allow(clippy::permissions_set_readonly_false)]
             perms.set_readonly(false);
             let _ = fs::set_permissions(path, perms);
         }
     }
 }
 
+#[cfg(windows)]
 fn clear_readonly_tree(path: &Path) {
     clear_readonly(path);
     let Ok(entries) = fs::read_dir(path) else {
@@ -65,8 +70,6 @@ fn clear_readonly_tree(path: &Path) {
 }
 
 fn remove_dir_all_robust(path: &Path) -> std::io::Result<()> {
-    clear_readonly_tree(path);
-
     #[cfg(not(windows))]
     {
         fs::remove_dir_all(path)
@@ -75,6 +78,8 @@ fn remove_dir_all_robust(path: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::thread;
+
+        clear_readonly_tree(path);
         use std::time::{Duration, Instant};
 
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -98,13 +103,14 @@ fn remove_dir_all_robust(path: &Path) -> std::io::Result<()> {
 }
 
 /// Restore zip-stored Unix permissions (execute bits for game binaries).
+/// Only the rwx bits are kept: setuid/setgid/sticky never come from an archive.
 /// No-op on Windows and when the entry has no Unix mode metadata.
 fn apply_unix_mode(path: &Path, mode: Option<u32>) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if let Some(mode) = mode {
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777));
         }
     }
     #[cfg(not(unix))]
@@ -113,15 +119,52 @@ fn apply_unix_mode(path: &Path, mode: Option<u32>) {
     }
 }
 
+/// Guards against zip bombs. Generous for a game build, small enough that a
+/// hostile archive can't fill the disk or stall the launcher indefinitely.
+#[derive(Clone, Copy)]
+struct ExtractLimits {
+    max_entries: usize,
+    max_total_bytes: u64,
+}
+
+const LIMITS: ExtractLimits = ExtractLimits {
+    max_entries: 200_000,
+    max_total_bytes: 64 * 1024 * 1024 * 1024,
+};
+
 fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Result<(), String> {
+    extract_zip_with_limits(archive, dest, progress, LIMITS)
+}
+
+fn extract_zip_with_limits(
+    archive: &Path,
+    dest: &Path,
+    progress: &dyn ProgressSink,
+    limits: ExtractLimits,
+) -> Result<(), String> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
     let mut zip = ZipArchive::new(file).map_err(|e| format!("invalid zip archive: {e}"))?;
 
     let entry_count = zip.len();
+    if entry_count > limits.max_entries {
+        return Err(format!(
+            "archive has too many entries ({entry_count} > {})",
+            limits.max_entries
+        ));
+    }
     let mut total_uncompressed: u64 = 0;
     for i in 0..entry_count {
         let entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        total_uncompressed += entry.size();
+        total_uncompressed = total_uncompressed.saturating_add(entry.size());
+    }
+    let too_large = || {
+        format!(
+            "archive expands beyond the {} GiB limit",
+            limits.max_total_bytes / (1024 * 1024 * 1024)
+        )
+    };
+    if total_uncompressed > limits.max_total_bytes {
+        return Err(too_large());
     }
 
     let report_interval = if total_uncompressed > 0 {
@@ -169,8 +212,12 @@ fn extract_zip(archive: &Path, dest: &Path, progress: &dyn ProgressSink) -> Resu
                 if n == 0 {
                     break;
                 }
-                outfile.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+                // Declared sizes can lie; enforce the cap on bytes actually written.
                 extracted += n as u64;
+                if extracted > limits.max_total_bytes {
+                    return Err(too_large());
+                }
+                outfile.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
                 if extracted - last_reported >= report_interval {
                     emit(extracted);
                     last_reported = extracted;
@@ -225,8 +272,8 @@ mod tests {
     fn write_zip(path: &Path, files: &[(&str, &[u8])]) {
         let file = fs::File::create(path).unwrap();
         let mut zip = ZipWriter::new(file);
-        let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
         for (name, data) in files {
             zip.start_file(*name, options).unwrap();
             zip.write_all(data).unwrap();
@@ -285,12 +332,10 @@ mod tests {
         let updates = sink.updates.lock().unwrap();
         assert!(!updates.is_empty());
         assert!(updates.iter().all(|u| u.phase == ProgressPhase::Extract));
-        assert!(
-            updates
-                .last()
-                .and_then(|u| u.percent)
-                .is_some_and(|p| (p - 100.0).abs() < f64::EPSILON)
-        );
+        assert!(updates
+            .last()
+            .and_then(|u| u.percent)
+            .is_some_and(|p| (p - 100.0).abs() < f64::EPSILON));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -305,6 +350,71 @@ mod tests {
             .extract_and_swap(&archive, &install, &NoopSink)
             .unwrap_err();
         assert!(err.contains("invalid zip"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_archive_with_too_many_entries() {
+        let root = temp_dir("limit-entries");
+        let archive = root.join("game.zip");
+        write_zip(
+            &archive,
+            &[("a.txt", b"a"), ("b.txt", b"b"), ("c.txt", b"c")],
+        );
+        let limits = ExtractLimits {
+            max_entries: 2,
+            max_total_bytes: u64::MAX,
+        };
+
+        let err =
+            extract_zip_with_limits(&archive, &root.join("game"), &NoopSink, limits).unwrap_err();
+        assert!(err.contains("too many entries"), "{err}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_archive_expanding_beyond_limit() {
+        let root = temp_dir("limit-size");
+        let archive = root.join("game.zip");
+        let big = vec![0u8; 4096];
+        write_zip(&archive, &[("big.bin", &big)]);
+        let limits = ExtractLimits {
+            max_entries: 10,
+            max_total_bytes: 1024,
+        };
+
+        let err =
+            extract_zip_with_limits(&archive, &root.join("game"), &NoopSink, limits).unwrap_err();
+        assert!(err.contains("limit"), "{err}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn strips_setuid_from_archive_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_dir("setuid");
+        let archive = root.join("game.zip");
+        let install = root.join("game");
+        let file = fs::File::create(&archive).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o4755);
+        zip.start_file("bin/game", options).unwrap();
+        zip.write_all(b"x").unwrap();
+        zip.finish().unwrap();
+
+        ZipExtractor
+            .extract_and_swap(&archive, &install, &NoopSink)
+            .unwrap();
+
+        let mode = fs::metadata(install.join("bin/game"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7000, 0, "got mode {mode:#o}");
         let _ = fs::remove_dir_all(root);
     }
 

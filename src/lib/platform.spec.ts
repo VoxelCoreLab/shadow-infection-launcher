@@ -13,9 +13,9 @@ describe("detectGameDownloadPlatform", () => {
   });
 
   it("detects macOS from platform hint", () => {
-    expect(detectGameDownloadPlatform("Mozilla/5.0", "MacIntel", undefined)).toBe(
-      "macos",
-    );
+    expect(
+      detectGameDownloadPlatform("Mozilla/5.0", "MacIntel", undefined),
+    ).toBe("macos");
   });
 
   it("falls back to linux for other agents", () => {

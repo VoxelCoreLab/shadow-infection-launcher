@@ -8,14 +8,45 @@ pub struct ReqwestDownloader {
     client: reqwest::blocking::Client,
 }
 
+const MAX_REDIRECTS: usize = 5;
+
 impl ReqwestDownloader {
     pub fn new() -> Result<Self, String> {
+        // Redirects must stay on HTTPS too, or a hop could downgrade the
+        // download of an executable to plain HTTP.
+        let redirects = reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_REDIRECTS {
+                attempt.error("too many redirects")
+            } else if attempt.url().scheme() != "https" {
+                attempt.error("redirect to a non-HTTPS URL refused")
+            } else {
+                attempt.follow()
+            }
+        });
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60 * 30))
+            .https_only(true)
+            .redirect(redirects)
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self { client })
     }
+}
+
+/// Game builds are executed after install, so only accept plain HTTPS URLs
+/// without embedded credentials.
+pub fn validate_download_url(raw: &str) -> Result<(), String> {
+    let url = reqwest::Url::parse(raw).map_err(|_| "invalid download url".to_string())?;
+    if url.scheme() != "https" {
+        return Err("download url must use https".into());
+    }
+    if url.host_str().is_none_or(str::is_empty) {
+        return Err("download url has no host".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("download url must not contain credentials".into());
+    }
+    Ok(())
 }
 
 fn download_percent(downloaded: u64, total: Option<u64>) -> Option<f64> {
@@ -43,10 +74,7 @@ impl HttpDownloader for ReqwestDownloader {
 
         let mut request = self.client.get(url);
         if resume_from > 0 {
-            request = request.header(
-                reqwest::header::RANGE,
-                format!("bytes={resume_from}-"),
-            );
+            request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
         }
 
         let mut response = request.send().map_err(|e| e.to_string())?;
@@ -125,5 +153,35 @@ impl HttpDownloader for ReqwestDownloader {
         }
 
         Ok(downloaded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_https_presigned_url() {
+        assert!(validate_download_url(
+            "https://storage.example.com/builds/game.zip?X-Amz-Signature=abc"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_non_https_and_odd_urls() {
+        for url in [
+            "http://storage.example.com/game.zip",
+            "file:///C:/Windows/System32/calc.exe",
+            "ftp://example.com/game.zip",
+            "https://user:pass@example.com/game.zip",
+            "not a url",
+            "",
+        ] {
+            assert!(
+                validate_download_url(url).is_err(),
+                "{url} should be rejected"
+            );
+        }
     }
 }

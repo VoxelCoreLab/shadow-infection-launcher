@@ -48,7 +48,7 @@ fn map_err(err: keyring::Error) -> String {
 
 #[cfg(test)]
 #[derive(Default)]
-struct InMemoryVault {
+pub(crate) struct InMemoryVault {
     token: Mutex<Option<String>>,
 }
 

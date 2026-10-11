@@ -159,10 +159,7 @@ const progressPercentLabel = computed(
           {{ error }}
         </div>
 
-        <div
-          v-if="showProgress"
-          class="w-full space-y-1.5 font-body"
-        >
+        <div v-if="showProgress" class="w-full space-y-1.5 font-body">
           <div class="flex justify-between text-xs text-slate-400">
             <span>{{ progressLabel }}</span>
             <span>{{ progressPercentLabel }}</span>
@@ -181,10 +178,7 @@ const progressPercentLabel = computed(
           <span :class="`text-sm font-medium ${statusColor}`">
             ● {{ statusLabel }}
           </span>
-          <span
-            v-if="localVersion"
-            class="text-xs text-slate-500"
-          >
+          <span v-if="localVersion" class="text-xs text-slate-500">
             v{{ localVersion }}
           </span>
           <span

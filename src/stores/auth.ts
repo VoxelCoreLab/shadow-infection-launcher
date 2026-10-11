@@ -5,9 +5,9 @@ import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth, firebaseApiKey } from "@/lib/firebase";
 import { mapFirebaseError } from "@/lib/firebase-errors";
 import {
-  exchangeRefreshToken,
   expiresAtFromIdToken,
   isInvalidRefreshTokenError,
+  refreshStoredSession,
   type SessionTokens,
 } from "@/lib/session";
 
@@ -51,38 +51,14 @@ export const useAuthStore = defineStore("auth", () => {
     );
   }
 
-  async function persistRotatedRefreshToken(
-    previous: string,
-    next: string,
-  ): Promise<void> {
-    if (next === previous) {
-      return;
-    }
-    await invoke("store_refresh_token", { token: next });
-  }
-
-  async function discardPersistedSession(): Promise<void> {
-    try {
-      await invoke("clear_refresh_token");
-    } catch {
-      // Vault is unavailable outside Tauri.
-    }
-  }
-
   async function restoreSession(): Promise<void> {
     try {
-      const refreshToken = await invoke<string | null>("get_refresh_token");
-      if (!refreshToken) {
-        return;
+      const session = await refreshStoredSession(firebaseApiKey);
+      if (session) {
+        applySession(session);
       }
-
-      const session = await exchangeRefreshToken(refreshToken, firebaseApiKey);
-      await persistRotatedRefreshToken(refreshToken, session.refreshToken);
-      applySession(session);
-    } catch (err) {
-      if (isInvalidRefreshTokenError(err)) {
-        await discardPersistedSession();
-      }
+    } catch {
+      // Invalid tokens are already removed from the vault by the backend.
       clearSession();
     } finally {
       ready.value = true;
@@ -110,10 +86,16 @@ export const useAuthStore = defineStore("auth", () => {
       await invoke("store_refresh_token", {
         token: credential.user.refreshToken,
       });
+      // The vault now owns the refresh token and later refreshes run in Rust;
+      // drop the SDK's in-memory copy so it can't be read from the webview.
+      try {
+        await signOut(auth);
+      } catch {
+        // Best effort: the session continues from the vault either way.
+      }
 
       applySession({
         idToken: token,
-        refreshToken: credential.user.refreshToken,
         expiresAt: expiresAtFromIdToken(token),
         uid: credential.user.uid,
         email: credential.user.email,
@@ -158,19 +140,16 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function performRefresh(): Promise<string | null> {
     try {
-      const refreshToken = await invoke<string | null>("get_refresh_token");
-      if (!refreshToken) {
+      const session = await refreshStoredSession(firebaseApiKey);
+      if (!session) {
         clearSession();
         return null;
       }
 
-      const session = await exchangeRefreshToken(refreshToken, firebaseApiKey);
-      await persistRotatedRefreshToken(refreshToken, session.refreshToken);
       applySession(session);
       return session.idToken;
     } catch (err) {
       if (isInvalidRefreshTokenError(err)) {
-        await discardPersistedSession();
         clearSession();
       }
       return null;
