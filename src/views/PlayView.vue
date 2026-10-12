@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useInstallStore } from "@/stores/install";
 import titleWordmark from "@/assets/shadow-infection-title.png";
+
+const productUrl = `${(
+  import.meta.env.VITE_WEBSITE_URL ?? "https://shadowinfection.com"
+).replace(/\/$/, "")}/product`;
 
 const install = useInstallStore();
 const {
@@ -22,10 +27,12 @@ const {
   canPlay,
   checkingUpdate,
   launching,
+  hasLicence,
 } = storeToRefs(install);
 
 onMounted(async () => {
   await install.refreshStatus();
+  await install.refreshLicence();
   await install.checkForUpdate({ applyAuto: true });
 });
 
@@ -34,6 +41,10 @@ const showProgress = computed(
     loading.value ||
     phase.value === "downloading" ||
     phase.value === "extracting",
+);
+
+const offerPurchase = computed(
+  () => hasLicence.value === false && !canPlay.value && !showProgress.value,
 );
 
 const statusLabel = computed(() => {
@@ -53,7 +64,7 @@ const statusLabel = computed(() => {
     case "installed":
       return "Ready to play";
     case "failed":
-      return "Error";
+      return "";
     default:
       return phase.value;
   }
@@ -72,8 +83,6 @@ const statusColor = computed(() => {
     case "downloading":
     case "extracting":
       return "text-amber-400";
-    case "failed":
-      return "text-red-400";
     default:
       return "text-slate-400";
   }
@@ -92,6 +101,9 @@ const primaryLabel = computed(() => {
   if (launching.value) {
     return "Starting…";
   }
+  if (offerPurchase.value) {
+    return "Buy";
+  }
   if (updateAvailable.value) {
     return "Update";
   }
@@ -108,15 +120,30 @@ const primaryEnabled = computed(
   () =>
     !checkingUpdate.value &&
     !launching.value &&
-    (canPlay.value || canInstallOrUpdate.value),
+    (canPlay.value || canInstallOrUpdate.value || offerPurchase.value),
 );
+
+async function openProductPage() {
+  try {
+    await openUrl(productUrl);
+  } catch (err) {
+    console.error(err);
+  }
+}
 
 async function onPrimaryClick() {
   if (canPlay.value) {
     await install.launch();
     return;
   }
-  await install.startGameInstall();
+  if (hasLicence.value === false) {
+    await openProductPage();
+    return;
+  }
+  const started = await install.startGameInstall();
+  if (!started && install.hasLicence === false) {
+    await openProductPage();
+  }
 }
 
 const progressPercent = computed(() => {
@@ -175,7 +202,10 @@ const progressPercentLabel = computed(
         </div>
 
         <div class="flex items-center gap-2 font-body">
-          <span :class="`text-sm font-medium ${statusColor}`">
+          <span
+            v-if="statusLabel"
+            :class="`text-sm font-medium ${statusColor}`"
+          >
             ● {{ statusLabel }}
           </span>
           <span v-if="localVersion" class="text-xs text-slate-500">

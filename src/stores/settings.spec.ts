@@ -15,6 +15,10 @@ vi.mock("@/api/settings", () => ({
   pickInstallDirectory: (...args: unknown[]) => pickInstallDirectory(...args),
 }));
 
+import {
+  FILE_ERROR_MESSAGE,
+  SETTINGS_FAILED_MESSAGE,
+} from "@/lib/operation-errors";
 import { useSettingsStore } from "./settings";
 
 describe("useSettingsStore", () => {
@@ -128,7 +132,27 @@ describe("useSettingsStore", () => {
     const ok = await store.save();
 
     expect(ok).toBe(false);
-    expect(store.error).toBe("disk error");
+    expect(store.error).toBe(FILE_ERROR_MESSAGE);
+    expect(store.error).not.toBe("disk error");
     expect(store.installPath).toBe("/new");
+  });
+
+  it("hides unknown save errors behind a general message", async () => {
+    getSettings.mockResolvedValue({
+      install_path: "/custom",
+      update_mode: "auto",
+    });
+    getDefaultInstallPath.mockResolvedValue("/default");
+    saveSettings.mockRejectedValue(new Error("serde exploded"));
+
+    const store = useSettingsStore();
+    await store.load();
+    store.installPath = "/new";
+
+    const ok = await store.save();
+
+    expect(ok).toBe(false);
+    expect(store.error).toBe(SETTINGS_FAILED_MESSAGE);
+    expect(store.error).not.toContain("serde");
   });
 });

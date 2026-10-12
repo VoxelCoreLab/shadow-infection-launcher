@@ -46,6 +46,12 @@ vi.mock("@/api/shop", () => ({
   },
 }));
 
+import {
+  FILE_ERROR_MESSAGE,
+  INSTALL_FAILED_MESSAGE,
+  LAUNCH_FAILED_MESSAGE,
+  NETWORK_ERROR_MESSAGE,
+} from "@/lib/operation-errors";
 import { LAUNCH_COOLDOWN_MS, useInstallStore } from "./install";
 
 describe("useInstallStore", () => {
@@ -151,6 +157,7 @@ describe("useInstallStore", () => {
       "1.2.3",
     );
     expect(store.phase).toBe("installed");
+    expect(store.hasLicence).toBe(true);
   });
 
   it("applies progress events", async () => {
@@ -261,7 +268,46 @@ describe("useInstallStore", () => {
 
     expect(ok).toBe(false);
     expect(startInstall).not.toHaveBeenCalled();
+    expect(store.hasLicence).toBe(false);
     expect(store.error).toMatch(/licence/i);
+    expect(store.phase).toBe("not_installed");
+  });
+
+  it("remembers a missing licence from the shop check", async () => {
+    getMyLicence.mockResolvedValue({ data: false });
+
+    const store = useInstallStore();
+    const valid = await store.refreshLicence();
+
+    expect(valid).toBe(false);
+    expect(store.hasLicence).toBe(false);
+    expect(store.error).toMatch(/licence/i);
+  });
+
+  it("does not auto-install when the licence is missing", async () => {
+    fetchLatestVersions.mockResolvedValue({
+      windows: "1.0.0",
+      macos: "2.0.0",
+      linux: "1.0.0",
+    });
+    getSettings.mockResolvedValue({
+      install_path: "/games",
+      update_mode: "auto",
+    });
+    getMyLicence.mockResolvedValue({ data: false });
+
+    const store = useInstallStore();
+    store.phase = "installed";
+    store.localVersion = "1.0.0";
+    await store.refreshLicence();
+
+    const available = await store.checkForUpdate({ applyAuto: true });
+
+    expect(available).toBe(true);
+    expect(startInstall).not.toHaveBeenCalled();
+    expect(store.hasLicence).toBe(false);
+    expect(store.error).toMatch(/licence/i);
+    expect(store.phase).toBe("installed");
   });
 
   it("surfaces shop download errors", async () => {
@@ -273,7 +319,9 @@ describe("useInstallStore", () => {
 
     expect(ok).toBe(false);
     expect(startInstall).not.toHaveBeenCalled();
-    expect(store.error).toBe("shop down");
+    expect(store.error).toBe(INSTALL_FAILED_MESSAGE);
+    expect(store.error).not.toBe("shop down");
+    expect(store.lastError).toBe("shop down");
     expect(store.phase).toBe("failed");
   });
 
@@ -289,7 +337,23 @@ describe("useInstallStore", () => {
     const ok = await store.startGameInstall();
 
     expect(ok).toBe(false);
-    expect(store.error).toBe("disk full");
+    expect(store.error).toBe(FILE_ERROR_MESSAGE);
+    expect(store.lastError).toBe("disk full");
+    expect(store.phase).toBe("failed");
+  });
+
+  it("maps network failures without showing the raw message", async () => {
+    getMyLicence.mockResolvedValue({ data: true });
+    fetchDownloadForPlatform.mockRejectedValue(
+      new Error("error sending request: connection refused"),
+    );
+
+    const store = useInstallStore();
+    const ok = await store.startGameInstall();
+
+    expect(ok).toBe(false);
+    expect(store.error).toBe(NETWORK_ERROR_MESSAGE);
+    expect(store.lastError).toBe("error sending request: connection refused");
     expect(store.phase).toBe("failed");
   });
 
@@ -585,6 +649,8 @@ describe("useInstallStore", () => {
     const ok = await store.launch();
 
     expect(ok).toBe(false);
-    expect(store.error).toBe("executable missing");
+    expect(store.error).toBe(LAUNCH_FAILED_MESSAGE);
+    expect(store.error).not.toBe("executable missing");
+    expect(store.lastError).toBe("executable missing");
   });
 });

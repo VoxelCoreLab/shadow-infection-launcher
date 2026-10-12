@@ -9,6 +9,10 @@ import {
   type LauncherSettings,
   type UpdateMode,
 } from "@/api/settings";
+import {
+  EMPTY_INSTALL_PATH_MESSAGE,
+  mapOperationError,
+} from "@/lib/operation-errors";
 
 export const useSettingsStore = defineStore("settings", () => {
   const installPath = ref("");
@@ -32,7 +36,7 @@ export const useSettingsStore = defineStore("settings", () => {
       defaultInstallPath.value = defaultPath;
       snapshot = { ...settings };
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      error.value = mapOperationError(err, "settings");
     } finally {
       loading.value = false;
     }
@@ -64,7 +68,7 @@ export const useSettingsStore = defineStore("settings", () => {
         installPath.value = picked;
       }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      error.value = mapOperationError(err, "settings");
     }
   }
 
@@ -73,14 +77,14 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       await openInstallFolder();
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      error.value = mapOperationError(err, "settings");
     }
   }
 
   async function save(): Promise<boolean> {
     const trimmed = installPath.value.trim();
     if (!trimmed) {
-      error.value = "Install path must not be empty.";
+      error.value = EMPTY_INSTALL_PATH_MESSAGE;
       return false;
     }
 
@@ -95,7 +99,7 @@ export const useSettingsStore = defineStore("settings", () => {
       snapshot = { ...saved };
       return true;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      error.value = mapOperationError(err, "settings");
       return false;
     } finally {
       saving.value = false;

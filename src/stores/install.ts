@@ -18,9 +18,21 @@ import {
 } from "@/api/game-downloads";
 import { getSettings } from "@/api/settings";
 import { shopApi } from "@/api/shop";
+import {
+  ALREADY_STARTING_MESSAGE,
+  ALREADY_UP_TO_DATE_MESSAGE,
+  INSTALL_BEFORE_LAUNCH_MESSAGE,
+  INSTALL_IN_PROGRESS_MESSAGE,
+  LAUNCH_WHILE_INSTALLING_MESSAGE,
+  LICENCE_MISSING_MESSAGE,
+  mapOperationError,
+  NOTHING_TO_UNINSTALL_MESSAGE,
+  technicalMessage,
+  UNINSTALL_WHILE_INSTALLING_MESSAGE,
+  UPDATE_BEFORE_LAUNCH_MESSAGE,
+  type OperationKind,
+} from "@/lib/operation-errors";
 import { detectGameDownloadPlatform } from "@/lib/platform";
-
-const LICENCE_MISSING_MESSAGE = "No valid licence. Download is not available.";
 
 /** Keeps Play disabled briefly so spam-clicks cannot spawn many processes. */
 export const LAUNCH_COOLDOWN_MS = 1500;
@@ -41,6 +53,8 @@ export const useInstallStore = defineStore("install", () => {
   const uninstalling = ref(false);
   const launching = ref(false);
   const error = ref<string | null>(null);
+  /** `null` until the shop licence check has run. */
+  const hasLicence = ref<boolean | null>(null);
 
   let progressUnlisten: UnlistenFn | null = null;
   let launchCooldownTimer: ReturnType<typeof setTimeout> | null = null;
@@ -82,6 +96,11 @@ export const useInstallStore = defineStore("install", () => {
       phase.value !== "extracting" &&
       (phase.value === "installed" || phase.value === "failed"),
   );
+
+  function showFailure(err: unknown, kind: OperationKind) {
+    lastError.value = technicalMessage(err);
+    error.value = mapOperationError(err, kind);
+  }
 
   function clearLaunchCooldown() {
     if (launchCooldownTimer !== null) {
@@ -138,6 +157,29 @@ export const useInstallStore = defineStore("install", () => {
     progressUnlisten = await listenInstallProgress(applyProgress);
   }
 
+  function applyLicence(valid: boolean) {
+    hasLicence.value = valid;
+    if (!valid) {
+      error.value = LICENCE_MISSING_MESSAGE;
+      return;
+    }
+    if (error.value === LICENCE_MISSING_MESSAGE) {
+      error.value = null;
+    }
+  }
+
+  async function refreshLicence(): Promise<boolean | null> {
+    try {
+      const licence =
+        await shopApi.gameLicences.gameLicencesControllerGetMyLicence();
+      const valid = Boolean(licence.data);
+      applyLicence(valid);
+      return valid;
+    } catch {
+      return hasLicence.value;
+    }
+  }
+
   async function refreshStatus(): Promise<void> {
     if (
       loading.value ||
@@ -149,7 +191,7 @@ export const useInstallStore = defineStore("install", () => {
     try {
       applyStatus(await getInstallStatus());
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      showFailure(err, "status");
     }
   }
 
@@ -165,14 +207,21 @@ export const useInstallStore = defineStore("install", () => {
     }
 
     checkingUpdate.value = true;
-    error.value = null;
+    if (hasLicence.value !== false) {
+      error.value = null;
+    }
     try {
       const latest = await fetchLatestVersions();
       const platform = detectGameDownloadPlatform();
       remoteVersion.value = latest[platform] ?? null;
       recomputeUpdateAvailable();
 
-      if (options.applyAuto && updateAvailable.value && canStartInstall.value) {
+      if (
+        options.applyAuto &&
+        updateAvailable.value &&
+        canStartInstall.value &&
+        hasLicence.value !== false
+      ) {
         const settings = await getSettings();
         if (settings.update_mode === "auto") {
           return startGameInstall();
@@ -181,7 +230,7 @@ export const useInstallStore = defineStore("install", () => {
 
       return updateAvailable.value;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      showFailure(err, "update");
       return false;
     } finally {
       checkingUpdate.value = false;
@@ -190,34 +239,34 @@ export const useInstallStore = defineStore("install", () => {
 
   async function startGameInstall(): Promise<boolean> {
     if (!canStartInstall.value) {
-      error.value = "An installation is already in progress.";
+      error.value = INSTALL_IN_PROGRESS_MESSAGE;
       return false;
     }
     if (isInstalled.value && !updateAvailable.value && remoteVersion.value) {
-      error.value = "Game is already up to date.";
+      error.value = ALREADY_UP_TO_DATE_MESSAGE;
       return false;
     }
 
     error.value = null;
     clearLaunchCooldown();
     launching.value = false;
-    loading.value = true;
-    phase.value = "downloading";
-    progressPhase.value = "download";
-    percent.value = 0;
-    downloaded.value = 0;
-    total.value = null;
 
     try {
-      await ensureProgressListener();
-
       const licence =
         await shopApi.gameLicences.gameLicencesControllerGetMyLicence();
-      if (!licence.data) {
-        error.value = LICENCE_MISSING_MESSAGE;
-        phase.value = "not_installed";
+      applyLicence(Boolean(licence.data));
+      if (!hasLicence.value) {
         return false;
       }
+
+      loading.value = true;
+      phase.value = "downloading";
+      progressPhase.value = "download";
+      percent.value = 0;
+      downloaded.value = 0;
+      total.value = null;
+
+      await ensureProgressListener();
 
       const download = await fetchDownloadForPlatform();
       const status = await startInstall(download.url, download.version);
@@ -228,10 +277,8 @@ export const useInstallStore = defineStore("install", () => {
       }
       return status.phase === "installed";
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      error.value = message;
+      showFailure(err, "install");
       phase.value = "failed";
-      lastError.value = message;
       return false;
     } finally {
       loading.value = false;
@@ -242,8 +289,8 @@ export const useInstallStore = defineStore("install", () => {
     if (!canUninstall.value) {
       error.value =
         phase.value === "downloading" || phase.value === "extracting"
-          ? "Cannot uninstall while an installation is running."
-          : "Nothing to uninstall.";
+          ? UNINSTALL_WHILE_INSTALLING_MESSAGE
+          : NOTHING_TO_UNINSTALL_MESSAGE;
       return false;
     }
 
@@ -262,7 +309,7 @@ export const useInstallStore = defineStore("install", () => {
       launching.value = false;
       return status.phase === "not_installed";
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
+      showFailure(err, "uninstall");
       return false;
     } finally {
       uninstalling.value = false;
@@ -271,19 +318,19 @@ export const useInstallStore = defineStore("install", () => {
 
   async function launch(): Promise<boolean> {
     if (isBusy.value) {
-      error.value = "Cannot launch while an installation is running.";
+      error.value = LAUNCH_WHILE_INSTALLING_MESSAGE;
       return false;
     }
     if (launching.value) {
-      error.value = "Game is already starting.";
+      error.value = ALREADY_STARTING_MESSAGE;
       return false;
     }
     if (!isInstalled.value) {
-      error.value = "Install the game before launching.";
+      error.value = INSTALL_BEFORE_LAUNCH_MESSAGE;
       return false;
     }
     if (updateAvailable.value) {
-      error.value = "Update the game before launching.";
+      error.value = UPDATE_BEFORE_LAUNCH_MESSAGE;
       return false;
     }
 
@@ -301,7 +348,7 @@ export const useInstallStore = defineStore("install", () => {
       return true;
     } catch (err) {
       launching.value = false;
-      error.value = err instanceof Error ? err.message : String(err);
+      showFailure(err, "launch");
       return false;
     }
   }
@@ -339,6 +386,7 @@ export const useInstallStore = defineStore("install", () => {
     uninstalling,
     launching,
     error,
+    hasLicence,
     isDownloading,
     isExtracting,
     isBusy,
@@ -348,6 +396,7 @@ export const useInstallStore = defineStore("install", () => {
     canPlay,
     canUninstall,
     refreshStatus,
+    refreshLicence,
     checkForUpdate,
     startGameInstall,
     uninstall,
