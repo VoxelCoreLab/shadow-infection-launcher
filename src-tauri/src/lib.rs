@@ -9,7 +9,19 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Windows and Linux open a deep link by starting another process. This
+    // plugin has to be first so that process exits and the URL is delivered
+    // to the launcher that is already open.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_running_launcher(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
@@ -20,7 +32,10 @@ pub fn run() {
                 url_scheme::claim(app.config().identifier.as_str());
             }
 
-            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+            // A dev run saves the handler under HKCU, and that overrides the
+            // installer's entry. Claim the scheme for this executable on every
+            // launch so the deep link reaches the launcher that is open.
+            #[cfg(any(target_os = "linux", windows))]
             {
                 app.deep_link().register_all()?;
             }
@@ -60,6 +75,18 @@ pub fn run() {
                 restore_deep_link_handler(&app);
             }
         });
+}
+
+#[cfg(desktop)]
+fn focus_running_launcher(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 fn restore_deep_link_handler(app: &tauri::AppHandle) {
