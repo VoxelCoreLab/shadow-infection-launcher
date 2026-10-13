@@ -46,8 +46,17 @@ export const STATUS_FAILED_MESSAGE =
 export const UPDATE_CHECK_FAILED_MESSAGE =
   "Could not check for updates. Please try again.";
 
+export const PATCH_NOTES_FAILED_MESSAGE =
+  "Could not load patch notes. Please try again.";
+
 export type OperationKind =
-  "install" | "launch" | "uninstall" | "settings" | "status" | "update";
+  | "install"
+  | "launch"
+  | "uninstall"
+  | "settings"
+  | "status"
+  | "update"
+  | "patchNotes";
 
 const USER_MESSAGES = [
   LICENCE_MISSING_MESSAGE,
@@ -68,6 +77,7 @@ const USER_MESSAGES = [
   SETTINGS_FAILED_MESSAGE,
   STATUS_FAILED_MESSAGE,
   UPDATE_CHECK_FAILED_MESSAGE,
+  PATCH_NOTES_FAILED_MESSAGE,
 ];
 
 const FALLBACK: Record<OperationKind, string> = {
@@ -77,6 +87,7 @@ const FALLBACK: Record<OperationKind, string> = {
   settings: SETTINGS_FAILED_MESSAGE,
   status: STATUS_FAILED_MESSAGE,
   update: UPDATE_CHECK_FAILED_MESSAGE,
+  patchNotes: PATCH_NOTES_FAILED_MESSAGE,
 };
 
 const NETWORK_PATTERN =

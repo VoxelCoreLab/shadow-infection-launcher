@@ -10,6 +10,7 @@ import {
   LICENCE_MISSING_MESSAGE,
   NETWORK_ERROR_MESSAGE,
   NOTHING_TO_UNINSTALL_MESSAGE,
+  PATCH_NOTES_FAILED_MESSAGE,
   SETTINGS_FAILED_MESSAGE,
   mapOperationError,
   technicalMessage,
@@ -71,6 +72,15 @@ describe("mapOperationError", () => {
         "install",
       ),
     ).toBe(FILE_ERROR_MESSAGE);
+  });
+
+  it("maps patch-notes failures", () => {
+    expect(mapOperationError(new Error("shop down"), "patchNotes")).toBe(
+      PATCH_NOTES_FAILED_MESSAGE,
+    );
+    expect(
+      mapOperationError(new Error("Failed to fetch"), "patchNotes"),
+    ).toBe(NETWORK_ERROR_MESSAGE);
   });
 
   it("replaces unknown exceptions with a general sentence", () => {

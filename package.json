@@ -26,6 +26,8 @@
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-opener": "^2.5.5",
     "firebase": "^11.10.0",
+    "isomorphic-dompurify": "^4.5.0",
+    "marked": "^18.1.1",
     "pinia": "^4.0.3",
     "vue": "^3.5.43",
     "vue-router": "^5.3.1"
