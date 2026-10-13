@@ -10,6 +10,9 @@ const auth = useAuthStore();
 
 const email = ref("");
 const password = ref("");
+const googlePending = ref(false);
+
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 const websiteUrl = (
   import.meta.env.VITE_WEBSITE_URL ?? "https://shadowinfection.com"
@@ -21,6 +24,25 @@ async function handleSubmit() {
   const ok = await auth.login(email.value, password.value);
   if (ok) {
     await router.push({ name: "play" });
+  }
+}
+
+async function handleGoogle() {
+  googlePending.value = true;
+  try {
+    const shopApiUrl = (
+      import.meta.env.VITE_SHOP_API_URL ?? "https://shop-api.shadowinfection.com"
+    ).replace(/\/$/, "");
+    const ok = await auth.loginWithGoogle(
+      googleClientId,
+      `${websiteUrl}/auth/launcher`,
+      shopApiUrl,
+    );
+    if (ok) {
+      await router.push({ name: "play" });
+    }
+  } finally {
+    googlePending.value = false;
   }
 }
 
@@ -69,10 +91,23 @@ async function openWebsitePath(path: string) {
         {{ auth.error }}
       </div>
 
-      <button type="submit" class="login-submit" :disabled="auth.loading">
+      <button
+        type="submit"
+        class="login-submit"
+        :disabled="auth.loading || googlePending"
+      >
         {{ auth.loading ? "Logging in" : "Log In" }}
       </button>
     </form>
+
+    <button
+      type="button"
+      class="google-submit"
+      :disabled="googlePending || auth.loading"
+      @click="handleGoogle"
+    >
+      {{ googlePending ? "Waiting for Google" : "Continue with Google" }}
+    </button>
 
     <div class="mt-5 flex items-center justify-center gap-4 text-center">
       <button
@@ -143,6 +178,30 @@ async function openWebsitePath(path: string) {
   filter: brightness(1.08);
 }
 .login-submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.google-submit {
+  width: 100%;
+  margin-top: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-launcher-border);
+  background: transparent;
+  padding: 0.75rem 1rem;
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.google-submit:hover:not(:disabled) {
+  border-color: var(--color-launcher-gold-dim);
+  color: var(--color-launcher-gold);
+}
+.google-submit:disabled {
   cursor: wait;
   opacity: 0.7;
 }

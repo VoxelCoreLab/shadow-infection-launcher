@@ -12,3 +12,8 @@ commands.allow = ["refresh_session"]
 identifier = "allow-clear-refresh-token"
 description = "Allows deleting the Firebase refresh token from the OS credential store."
 commands.allow = ["clear_refresh_token"]
+
+[[permission]]
+identifier = "allow-start-google-login"
+description = "Allows opening the system browser for Google sign-in. The shop API exchanges the code and the launcher fetches the ID token with a secret that stays on this device."
+commands.allow = ["start_google_login"]

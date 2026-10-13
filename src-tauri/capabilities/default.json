@@ -14,6 +14,7 @@
     "allow-store-refresh-token",
     "allow-refresh-session",
     "allow-clear-refresh-token",
+    "allow-start-google-login",
     "allow-get-settings",
     "allow-save-settings",
     "allow-get-default-install-path",

@@ -3,18 +3,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionError } from "@/lib/session";
 
 const signInWithEmailAndPassword = vi.fn();
+const signInWithCredential = vi.fn();
+const googleCredential = vi.fn();
 const signOut = vi.fn();
 const invoke = vi.fn();
+const listen = vi.fn();
 const refreshStoredSession = vi.fn();
 
 vi.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: (...args: unknown[]) =>
     signInWithEmailAndPassword(...args),
+  signInWithCredential: (...args: unknown[]) => signInWithCredential(...args),
+  GoogleAuthProvider: {
+    credential: (...args: unknown[]) => googleCredential(...args),
+  },
   signOut: (...args: unknown[]) => signOut(...args),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => listen(...args),
 }));
 
 vi.mock("@/lib/firebase", () => ({
@@ -54,12 +65,27 @@ function idTokenFor(
   });
 }
 
+const GOOGLE_CLIENT_ID = "1234567890-abc.apps.googleusercontent.com";
+const GOOGLE_REDIRECT = "https://shadowinfection.com/auth/launcher";
+const SHOP_API = "https://shop-api.shadowinfection.com";
+
+type GoogleHandler = (event: { payload: string }) => void;
+
 describe("useAuthStore", () => {
+  const googleHandlers = new Map<string, GoogleHandler>();
+
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    googleHandlers.clear();
     invoke.mockResolvedValue(null);
     refreshStoredSession.mockResolvedValue(null);
+    listen.mockImplementation(async (event: string, handler: GoogleHandler) => {
+      googleHandlers.set(event, handler);
+      return () => {
+        googleHandlers.delete(event);
+      };
+    });
   });
 
   it("logs in and stores the refresh token", async () => {
@@ -334,5 +360,137 @@ describe("useAuthStore", () => {
     expect(await first).toBe("id-token-3");
     expect(await second).toBe("id-token-3");
     expect(refreshStoredSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the Firebase refresh token after a Google sign-in", async () => {
+    const token = idTokenFor("uid-1", "a@example.com");
+    const order: string[] = [];
+    googleCredential.mockReturnValue({ providerId: "google.com" });
+    signInWithCredential.mockResolvedValue({
+      user: {
+        uid: "uid-1",
+        email: "a@example.com",
+        refreshToken: "refresh-1",
+        getIdToken: vi.fn().mockResolvedValue(token),
+      },
+    });
+    listen.mockImplementation(async (event: string, handler: GoogleHandler) => {
+      order.push(`listen:${event}`);
+      googleHandlers.set(event, handler);
+      return () => {
+        googleHandlers.delete(event);
+      };
+    });
+    invoke.mockImplementation(async (command: string) => {
+      order.push(command);
+      if (command === "start_google_login") {
+        googleHandlers.get("google-login-success")?.({
+          payload: "google-id-token",
+        });
+      }
+    });
+    signOut.mockImplementation(async () => {
+      order.push("signOut");
+    });
+
+    const auth = useAuthStore();
+    const ok = await auth.loginWithGoogle(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_REDIRECT,
+      SHOP_API,
+    );
+
+    expect(ok).toBe(true);
+    expect(listen).toHaveBeenCalledWith(
+      "google-login-success",
+      expect.any(Function),
+    );
+    expect(googleCredential).toHaveBeenCalledWith("google-id-token");
+    expect(signInWithCredential).toHaveBeenCalledWith(
+      { name: "mock-auth" },
+      { providerId: "google.com" },
+    );
+    expect(order).toEqual([
+      "listen:google-login-success",
+      "listen:google-login-error",
+      "start_google_login",
+      "store_refresh_token",
+      "signOut",
+    ]);
+    expect(invoke).toHaveBeenCalledWith("store_refresh_token", {
+      token: "refresh-1",
+    });
+    expect(auth.isLoggedIn).toBe(true);
+    expect(auth.user).toEqual({ uid: "uid-1", email: "a@example.com" });
+  });
+
+  it("does not store a refresh token when Google sign-in fails", async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "start_google_login") {
+        googleHandlers.get("google-login-error")?.({
+          payload: "failed",
+        });
+      }
+    });
+
+    const auth = useAuthStore();
+    const ok = await auth.loginWithGoogle(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_REDIRECT,
+      SHOP_API,
+    );
+
+    expect(ok).toBe(false);
+    expect(auth.error).toBe("Google sign-in failed. Please try again.");
+    expect(auth.isLoggedIn).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith(
+      "store_refresh_token",
+      expect.anything(),
+    );
+    expect(signInWithCredential).not.toHaveBeenCalled();
+  });
+
+  it("shows the rate limit when Google sign-in is attempted too often", async () => {
+    invoke.mockRejectedValue("too_many");
+
+    const auth = useAuthStore();
+    const ok = await auth.loginWithGoogle(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_REDIRECT,
+      SHOP_API,
+    );
+
+    expect(ok).toBe(false);
+    expect(auth.error).toBe(
+      "Too many sign-in attempts. Wait a minute and try again.",
+    );
+  });
+
+  it("times out when the deep link never arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const auth = useAuthStore();
+      const pending = auth.loginWithGoogle(
+        GOOGLE_CLIENT_ID,
+        GOOGLE_REDIRECT,
+        SHOP_API,
+      );
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+
+      expect(await pending).toBe(false);
+      expect(auth.error).toBe("Google sign-in timed out. Please try again.");
+      expect(signInWithCredential).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a missing Google client id without opening the browser", async () => {
+    const auth = useAuthStore();
+    const ok = await auth.loginWithGoogle("  ", GOOGLE_REDIRECT, SHOP_API);
+
+    expect(ok).toBe(false);
+    expect(auth.error).toBe("Google sign-in is not configured.");
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

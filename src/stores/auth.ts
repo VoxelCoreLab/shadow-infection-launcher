@@ -1,9 +1,20 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signOut,
+  type UserCredential,
+} from "firebase/auth";
 import { auth, firebaseApiKey } from "@/lib/firebase";
-import { mapFirebaseError } from "@/lib/firebase-errors";
+import {
+  GOOGLE_SIGN_IN_UNAVAILABLE,
+  mapFirebaseError,
+  mapGoogleLoginError,
+} from "@/lib/firebase-errors";
 import {
   expiresAtFromIdToken,
   isInvalidRefreshTokenError,
@@ -12,12 +23,63 @@ import {
 } from "@/lib/session";
 
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+const GOOGLE_LOGIN_TIMEOUT_MS = 3 * 60 * 1000;
 const LOGOUT_FAILED_MESSAGE = "Could not sign out. Please try again.";
 
 export type AuthUser = {
   uid: string;
   email: string | null;
 };
+
+async function requestGoogleIdToken(
+  clientId: string,
+  redirectUri: string,
+  shopApiUrl: string,
+): Promise<string> {
+  let stopSuccess: UnlistenFn = () => {};
+  let stopError: UnlistenFn = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const cleanup = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    stopSuccess();
+    stopError();
+  };
+
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("timeout")),
+        GOOGLE_LOGIN_TIMEOUT_MS,
+      );
+
+      void (async () => {
+        try {
+          stopSuccess = await listen<string>(
+            "google-login-success",
+            (event) => {
+              resolve(event.payload);
+            },
+          );
+          stopError = await listen<string>("google-login-error", (event) => {
+            reject(new Error(event.payload));
+          });
+          await invoke("start_google_login", {
+            clientId,
+            redirectUri,
+            shopApiUrl,
+          });
+        } catch (err) {
+          reject(err);
+        }
+      })();
+    });
+  } finally {
+    cleanup();
+  }
+}
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<AuthUser | null>(null);
@@ -72,6 +134,27 @@ export const useAuthStore = defineStore("auth", () => {
     return initPromise;
   }
 
+  async function adoptCredential(credential: UserCredential): Promise<void> {
+    const token = await credential.user.getIdToken();
+    await invoke("store_refresh_token", {
+      token: credential.user.refreshToken,
+    });
+    // The vault now owns the refresh token and later refreshes run in Rust;
+    // drop the SDK's in-memory copy so it can't be read from the webview.
+    try {
+      await signOut(auth);
+    } catch {
+      // Best effort: the session continues from the vault either way.
+    }
+
+    applySession({
+      idToken: token,
+      expiresAt: expiresAtFromIdToken(token),
+      uid: credential.user.uid,
+      email: credential.user.email,
+    });
+  }
+
   async function login(email: string, password: string): Promise<boolean> {
     error.value = null;
     loading.value = true;
@@ -82,24 +165,7 @@ export const useAuthStore = defineStore("auth", () => {
         email,
         password,
       );
-      const token = await credential.user.getIdToken();
-      await invoke("store_refresh_token", {
-        token: credential.user.refreshToken,
-      });
-      // The vault now owns the refresh token and later refreshes run in Rust;
-      // drop the SDK's in-memory copy so it can't be read from the webview.
-      try {
-        await signOut(auth);
-      } catch {
-        // Best effort: the session continues from the vault either way.
-      }
-
-      applySession({
-        idToken: token,
-        expiresAt: expiresAtFromIdToken(token),
-        uid: credential.user.uid,
-        email: credential.user.email,
-      });
+      await adoptCredential(credential);
       return true;
     } catch (err: unknown) {
       error.value = mapFirebaseError(err);
@@ -107,6 +173,37 @@ export const useAuthStore = defineStore("auth", () => {
       return false;
     } finally {
       loading.value = false;
+    }
+  }
+
+  async function loginWithGoogle(
+    clientId: string,
+    redirectUri: string,
+    shopApiUrl: string,
+  ): Promise<boolean> {
+    error.value = null;
+    if (!clientId.trim()) {
+      error.value = GOOGLE_SIGN_IN_UNAVAILABLE;
+      return false;
+    }
+
+    try {
+      const googleIdToken = await requestGoogleIdToken(
+        clientId,
+        redirectUri,
+        shopApiUrl,
+      );
+      const credential = await signInWithCredential(
+        auth,
+        GoogleAuthProvider.credential(googleIdToken),
+      );
+      await adoptCredential(credential);
+      return true;
+    } catch (err: unknown) {
+      console.error("Google sign-in failed", err);
+      error.value = mapGoogleLoginError(err);
+      clearSession();
+      return false;
     }
   }
 
@@ -176,6 +273,7 @@ export const useAuthStore = defineStore("auth", () => {
     isLoggedIn,
     initialize,
     login,
+    loginWithGoogle,
     logout,
     getIdToken,
     refreshSession,
