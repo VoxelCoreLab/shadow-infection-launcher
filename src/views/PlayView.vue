@@ -196,15 +196,6 @@ const progressPercentLabel = computed(
           </button>
         </div>
 
-        <div
-          v-if="launching"
-          class="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-2 font-body text-sm text-amber-200"
-          role="status"
-          aria-live="polite"
-        >
-          Game is starting… Please wait. Extra clicks are ignored.
-        </div>
-
         <div v-if="showProgress" class="w-full space-y-1.5 font-body">
           <div class="flex justify-between text-xs text-slate-400">
             <span>{{ progressLabel }}</span>
