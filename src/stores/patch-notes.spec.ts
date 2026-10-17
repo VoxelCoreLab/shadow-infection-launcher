@@ -85,9 +85,9 @@ describe("usePatchNotesStore", () => {
   });
 
   it("sorts by semantic version descending, not createdAt", () => {
-    expect(sortNotes([noteA, noteC, noteB]).map((note) => note.version)).toEqual(
-      ["1.10.0", "1.2.3", "1.1.0"],
-    );
+    expect(
+      sortNotes([noteA, noteC, noteB]).map((note) => note.version),
+    ).toEqual(["1.10.0", "1.2.3", "1.1.0"]);
   });
 
   it("puts 0.0.94 above 0.0.85 even when 0.0.85 is newer", () => {

@@ -71,9 +71,9 @@ describe("fetchWithAuthRetry", () => {
     expect(response.status).toBe(200);
     expect(refreshSession).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Authorization")).toBe(
-      "Bearer new-token",
-    );
+    expect(
+      new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Authorization"),
+    ).toBe("Bearer new-token");
   });
 
   it("does not refresh after 401 on public calls", async () => {
@@ -92,7 +92,9 @@ describe("fetchWithAuthRetry", () => {
       (_input: RequestInfo | URL, init?: RequestInit) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => {
-            reject(init.signal?.reason ?? new DOMException("aborted", "AbortError"));
+            reject(
+              init.signal?.reason ?? new DOMException("aborted", "AbortError"),
+            );
           });
         }),
     );

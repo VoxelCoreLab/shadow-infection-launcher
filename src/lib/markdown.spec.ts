@@ -12,7 +12,7 @@ describe("renderMarkdown", () => {
   });
 
   it("strips script tags", () => {
-    const html = renderMarkdown('Hello <script>alert(1)</script>');
+    const html = renderMarkdown("Hello <script>alert(1)</script>");
 
     expect(html).not.toContain("<script");
     expect(html).toContain("Hello");

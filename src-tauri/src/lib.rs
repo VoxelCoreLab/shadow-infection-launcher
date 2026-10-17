@@ -72,7 +72,7 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                restore_deep_link_handler(&app);
+                restore_deep_link_handler(app);
             }
         });
 }

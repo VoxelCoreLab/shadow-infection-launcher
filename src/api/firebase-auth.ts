@@ -22,7 +22,9 @@ function mergeAbortSignals(
 ): { signal: AbortSignal; cancelTimer: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => {
-    controller.abort(new DOMException("The operation was aborted.", "TimeoutError"));
+    controller.abort(
+      new DOMException("The operation was aborted.", "TimeoutError"),
+    );
   }, timeoutMs);
 
   const onExternalAbort = () => {

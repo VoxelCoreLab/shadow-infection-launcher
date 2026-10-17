@@ -78,9 +78,9 @@ describe("mapOperationError", () => {
     expect(mapOperationError(new Error("shop down"), "patchNotes")).toBe(
       PATCH_NOTES_FAILED_MESSAGE,
     );
-    expect(
-      mapOperationError(new Error("Failed to fetch"), "patchNotes"),
-    ).toBe(NETWORK_ERROR_MESSAGE);
+    expect(mapOperationError(new Error("Failed to fetch"), "patchNotes")).toBe(
+      NETWORK_ERROR_MESSAGE,
+    );
   });
 
   it("replaces unknown exceptions with a general sentence", () => {

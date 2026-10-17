@@ -107,7 +107,9 @@ function toggle(note: PatchNoteDto) {
       class="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-launcher-border/60 bg-black/55 px-6 py-10 text-center backdrop-blur-md"
       role="status"
     >
-      <p class="font-display text-lg text-launcher-gold-dim">No patch notes yet</p>
+      <p class="font-display text-lg text-launcher-gold-dim">
+        No patch notes yet
+      </p>
       <p class="max-w-sm font-body text-sm text-slate-400">
         When a note is published for your game version, it will appear here.
       </p>

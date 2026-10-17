@@ -31,7 +31,8 @@ async function handleGoogle() {
   googlePending.value = true;
   try {
     const shopApiUrl = (
-      import.meta.env.VITE_SHOP_API_URL ?? "https://shop-api.shadowinfection.com"
+      import.meta.env.VITE_SHOP_API_URL ??
+      "https://shop-api.shadowinfection.com"
     ).replace(/\/$/, "");
     const ok = await auth.loginWithGoogle(
       googleClientId,
