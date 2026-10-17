@@ -2,6 +2,7 @@
 import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import PrimaryButton from "@/components/PrimaryButton.vue";
 import { useInstallStore } from "@/stores/install";
 import titleWordmark from "@/assets/shadow-infection-title.png";
 
@@ -245,14 +246,14 @@ const progressPercentLabel = computed(
         </p>
 
         <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="play-action disabled:cursor-not-allowed disabled:opacity-60"
+          <PrimaryButton
+            class="min-w-48"
             :disabled="!primaryEnabled"
+            :loading="showProgress || launching || checkingUpdate"
             @click="onPrimaryClick"
           >
             {{ primaryLabel }}
-          </button>
+          </PrimaryButton>
           <button
             v-if="phase === 'failed' && !showProgress"
             type="button"
@@ -286,20 +287,5 @@ const progressPercentLabel = computed(
     var(--color-launcher-gold-dim) 0%,
     var(--color-launcher-gold) 100%
   );
-}
-
-.play-action {
-  min-width: 12rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(253, 199, 135, 0.35);
-  background: linear-gradient(180deg, #fdc787 0%, #c4924d 100%);
-  padding: 0.75rem 1.25rem;
-  font-family: var(--font-display);
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #1a0f04;
-  cursor: pointer;
 }
 </style>
