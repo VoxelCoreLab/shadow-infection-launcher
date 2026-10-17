@@ -66,17 +66,20 @@ async function handleUninstall() {
 <template>
   <div
     v-if="ui.isSettingsOpen"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
     @click.self="handleCancel"
   >
     <div
-      class="w-full max-w-lg space-y-5 rounded-lg border border-zinc-300 bg-white p-6 text-zinc-900 shadow-xl"
+      class="settings-panel w-full max-w-lg space-y-5 rounded-lg border border-launcher-border bg-launcher-surface p-6 text-slate-100"
       role="dialog"
       aria-labelledby="settings-title"
     >
       <header class="flex items-start justify-between gap-3">
-        <h2 id="settings-title" class="text-lg font-semibold tracking-wide">
-          SETTINGS
+        <h2
+          id="settings-title"
+          class="font-display text-lg font-bold tracking-[0.08em] text-launcher-gold uppercase"
+        >
+          Settings
         </h2>
         <button
           type="button"
@@ -90,30 +93,25 @@ async function handleUninstall() {
 
       <p
         v-if="settings.error || install.error"
-        class="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+        class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 font-body text-sm text-red-400"
         role="alert"
       >
         {{ settings.error || install.error }}
       </p>
 
       <section class="space-y-2">
-        <label
-          class="block text-xs font-semibold tracking-wide text-zinc-500"
-          for="install-path"
-        >
-          INSTALL PATH
-        </label>
+        <label class="settings-label" for="install-path"> Install path </label>
         <div class="flex gap-2">
           <input
             id="install-path"
             v-model="settings.installPath"
             type="text"
-            class="min-w-0 flex-1 rounded border border-zinc-300 px-3 py-2 text-sm"
+            class="settings-input min-w-0 flex-1"
             :disabled="settingsBusy || pathLocked"
           />
           <button
             type="button"
-            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-60"
+            class="settings-ghost shrink-0"
             :disabled="settingsBusy || pathLocked"
             @click="settings.browse()"
           >
@@ -121,7 +119,7 @@ async function handleUninstall() {
           </button>
           <button
             type="button"
-            class="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-60"
+            class="settings-ghost shrink-0"
             :disabled="settingsBusy || pathLocked"
             @click="settings.resetToDefaultPath()"
           >
@@ -130,14 +128,14 @@ async function handleUninstall() {
         </div>
         <p
           v-if="pathLocked && !install.isBusy && !install.uninstalling"
-          class="text-xs text-zinc-500"
+          class="font-body text-xs text-slate-500"
         >
           Uninstall the game before changing the install path.
         </p>
-        <div class="flex flex-wrap items-center gap-3 text-sm">
+        <div class="flex flex-wrap items-center gap-3 font-body text-sm">
           <button
             type="button"
-            class="text-zinc-600 underline-offset-2 hover:underline disabled:opacity-60"
+            class="cursor-pointer text-slate-400 underline decoration-slate-500/60 underline-offset-2 transition-colors hover:text-launcher-gold disabled:opacity-60"
             :disabled="settingsBusy"
             @click="settings.openFolder()"
           >
@@ -147,17 +145,17 @@ async function handleUninstall() {
             <button
               v-if="!confirmUninstall"
               type="button"
-              class="text-zinc-600 transition-colors hover:text-red-600"
+              class="cursor-pointer text-slate-400 transition-colors hover:text-red-400 disabled:opacity-60"
               :disabled="!install.canUninstall || install.uninstalling"
               @click="confirmUninstall = true"
             >
               Uninstall
             </button>
             <span v-else class="flex items-center gap-2">
-              <span class="text-red-600">Uninstall game?</span>
+              <span class="text-red-400">Uninstall game?</span>
               <button
                 type="button"
-                class="font-medium text-red-700 hover:text-red-500 disabled:opacity-40"
+                class="cursor-pointer font-medium text-red-300 hover:text-red-400 disabled:opacity-40"
                 :disabled="install.uninstalling"
                 @click="handleUninstall"
               >
@@ -165,7 +163,7 @@ async function handleUninstall() {
               </button>
               <button
                 type="button"
-                class="text-zinc-500 hover:text-zinc-800"
+                class="cursor-pointer text-slate-500 transition-colors hover:text-slate-200"
                 :disabled="install.uninstalling"
                 @click="confirmUninstall = false"
               >
@@ -177,36 +175,42 @@ async function handleUninstall() {
       </section>
 
       <section
-        class="flex items-center justify-between gap-4 border-t border-zinc-200 pt-4"
+        class="flex items-center justify-between gap-4 border-t border-launcher-border pt-4"
       >
         <div>
-          <p class="font-medium">Automatic updates</p>
-          <p class="text-sm text-zinc-500">Apply new versions on launch</p>
+          <p class="font-body font-medium text-slate-100">Automatic updates</p>
+          <p class="font-body text-sm text-slate-500">
+            Apply new versions on launch
+          </p>
         </div>
         <button
           type="button"
           role="switch"
-          class="relative h-7 w-12 rounded-full transition-colors"
+          class="settings-switch"
           :class="
-            settings.updateMode === 'auto' ? 'bg-emerald-500' : 'bg-zinc-300'
+            settings.updateMode === 'auto'
+              ? 'settings-switch--on'
+              : 'settings-switch--off'
           "
           :aria-checked="settings.updateMode === 'auto'"
           :disabled="settingsBusy"
           @click="settings.setAutoUpdates(settings.updateMode !== 'auto')"
         >
           <span
-            class="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
-            :class="
-              settings.updateMode === 'auto' ? 'translate-x-5' : 'translate-x-0'
-            "
+            class="settings-switch__knob"
+            :class="{
+              'settings-switch__knob--on': settings.updateMode === 'auto',
+            }"
           />
         </button>
       </section>
 
-      <footer class="flex justify-end gap-2 border-t border-zinc-200 pt-4">
+      <footer
+        class="flex justify-end gap-2 border-t border-launcher-border pt-4"
+      >
         <button
           type="button"
-          class="rounded border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100"
+          class="settings-ghost"
           :disabled="settings.saving || install.uninstalling || install.isBusy"
           @click="handleCancel"
         >
@@ -214,7 +218,7 @@ async function handleUninstall() {
         </button>
         <button
           type="button"
-          class="rounded border-2 border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+          class="settings-save"
           :disabled="settingsBusy"
           @click="handleSave"
         >
@@ -226,6 +230,139 @@ async function handleUninstall() {
 </template>
 
 <style scoped>
+.settings-panel {
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(253, 199, 135, 0.06);
+}
+
+.settings-label {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-launcher-gold-dim);
+}
+
+.settings-input {
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-launcher-border);
+  background:
+    linear-gradient(180deg, rgba(253, 199, 135, 0.06) 0%, transparent 50%),
+    var(--color-launcher-surface);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: white;
+  outline: none;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 150ms ease;
+}
+.settings-input:focus {
+  border-color: var(--color-launcher-gold-dim);
+  background:
+    linear-gradient(180deg, rgba(253, 199, 135, 0.1) 0%, transparent 50%),
+    var(--color-launcher-bg);
+  box-shadow: 0 0 0 3px rgba(253, 199, 135, 0.12);
+}
+.settings-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-ghost {
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-launcher-border);
+  background: transparent;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+.settings-ghost:hover:not(:disabled) {
+  border-color: var(--color-launcher-gold-dim);
+  color: var(--color-launcher-gold);
+}
+.settings-ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-save {
+  border-radius: 0.5rem;
+  border: 1px solid rgba(253, 199, 135, 0.35);
+  background: linear-gradient(180deg, #fdc787 0%, #c4924d 100%);
+  padding: 0.5rem 1rem;
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1a0f04;
+  cursor: pointer;
+  transition:
+    filter 150ms ease,
+    opacity 150ms ease;
+}
+.settings-save:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.settings-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-switch {
+  position: relative;
+  height: 1.75rem;
+  width: 3rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+.settings-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.settings-switch--on {
+  border: 1px solid rgba(253, 199, 135, 0.55);
+  background: var(--color-launcher-gold);
+}
+.settings-switch--off {
+  border: 1px solid var(--color-launcher-border);
+  background: var(--color-launcher-void);
+}
+.settings-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  height: calc(1.75rem - 6px);
+  width: calc(1.75rem - 6px);
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 150ms ease;
+}
+.settings-switch__knob--on {
+  transform: translateX(calc(3rem - 1.75rem));
+}
+
 .settings-close {
   display: flex;
   height: 1.75rem;
@@ -233,7 +370,7 @@ async function handleUninstall() {
   align-items: center;
   justify-content: center;
   border-radius: 0.25rem;
-  color: #71717a;
+  color: var(--color-launcher-gold-dim);
   cursor: pointer;
   transition:
     color 150ms ease,
