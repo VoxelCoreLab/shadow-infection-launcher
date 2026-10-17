@@ -219,6 +219,67 @@ fn extract_failure_keeps_previous_version_playable() {
 }
 
 #[test]
+fn clear_last_error_keeps_partial_download() {
+    let root = temp_root("clear-error");
+    let (service, state) = build_service(
+        root.clone(),
+        Arc::new(FakeDownloader::ok(b"zip-bytes".to_vec())) as Arc<dyn HttpDownloader>,
+        Arc::new(FakeExtractor { fail: false }),
+    );
+    state
+        .save(&InstallState {
+            version: None,
+            download: Some(DownloadProgress {
+                version: "1.0.0".into(),
+                size: 100,
+                bytes: 40,
+            }),
+            last_error: Some("extract failed".into()),
+        })
+        .unwrap();
+
+    let status = service.clear_last_error().unwrap();
+
+    assert_eq!(status.phase, InstallPhase::NotInstalled);
+    assert!(status.last_error.is_none());
+    let saved = state.load().unwrap();
+    assert!(saved.last_error.is_none());
+    assert_eq!(saved.download.as_ref().map(|d| d.bytes), Some(40));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn clear_last_error_keeps_installed_version() {
+    let root = temp_root("clear-error-installed");
+    let (service, state) = build_service(
+        root.clone(),
+        Arc::new(FakeDownloader::ok(b"zip-bytes".to_vec())) as Arc<dyn HttpDownloader>,
+        Arc::new(FakeExtractor { fail: false }),
+    );
+    state
+        .save(&InstallState {
+            version: Some("1.0.0".into()),
+            download: Some(DownloadProgress {
+                version: "2.0.0".into(),
+                size: 80,
+                bytes: 10,
+            }),
+            last_error: Some("extract failed".into()),
+        })
+        .unwrap();
+
+    let status = service.clear_last_error().unwrap();
+
+    assert_eq!(status.phase, InstallPhase::Installed);
+    assert_eq!(status.local_version.as_deref(), Some("1.0.0"));
+    assert!(status.last_error.is_none());
+    let saved = state.load().unwrap();
+    assert_eq!(saved.version.as_deref(), Some("1.0.0"));
+    assert_eq!(saved.download.as_ref().map(|d| d.bytes), Some(10));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn resume_uses_range_offset_when_state_matches() {
     let root = temp_root("resume");
     let payload = b"abcdefghij".to_vec();

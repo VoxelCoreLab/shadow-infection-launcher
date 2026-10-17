@@ -185,6 +185,11 @@ pub async fn start_install(
 }
 
 #[tauri::command]
+pub fn clear_install_error(app: AppHandle) -> Result<InstallStatusDto, String> {
+    with_runtime(&app, |rt| rt.service.clear_last_error())
+}
+
+#[tauri::command]
 pub fn uninstall_game(app: AppHandle) -> Result<InstallStatusDto, String> {
     with_runtime(&app, |rt| rt.service.uninstall())
 }

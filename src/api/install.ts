@@ -40,6 +40,10 @@ export async function startInstall(
   return invoke<InstallStatus>("start_install", { url, version });
 }
 
+export async function clearInstallError(): Promise<InstallStatus> {
+  return invoke<InstallStatus>("clear_install_error");
+}
+
 export async function uninstallGame(): Promise<InstallStatus> {
   return invoke<InstallStatus>("uninstall_game");
 }

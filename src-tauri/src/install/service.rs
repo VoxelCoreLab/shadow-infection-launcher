@@ -307,6 +307,19 @@ impl InstallService {
         self.state_store.save(&state)
     }
 
+    /// Drop the persisted failure so the UI can leave `fehlerhaft`.
+    /// Partial download progress stays, so the next attempt can resume.
+    pub fn clear_last_error(&self) -> Result<InstallStatusDto, String> {
+        if self.is_busy()? {
+            return Err("cannot dismiss an install error while an installation is running".into());
+        }
+
+        let mut state = self.state_store.load().unwrap_or_default();
+        state.last_error = None;
+        self.state_store.save(&state)?;
+        self.status()
+    }
+
     pub fn uninstall(&self) -> Result<InstallStatusDto, String> {
         {
             let busy = self.busy.lock().map_err(|e| e.to_string())?;

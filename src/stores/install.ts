@@ -2,6 +2,7 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  clearInstallError,
   getInstallStatus,
   launchGame,
   listenInstallProgress,
@@ -102,6 +103,16 @@ export const useInstallStore = defineStore("install", () => {
     error.value = mapOperationError(err, kind);
   }
 
+  /** Persisted core failure: update when a version is still installed, otherwise install. */
+  function showPersistedError() {
+    if (!lastError.value) {
+      return;
+    }
+    const kind: OperationKind =
+      phase.value === "installed" ? "update" : "install";
+    error.value = mapOperationError(lastError.value, kind);
+  }
+
   function clearLaunchCooldown() {
     if (launchCooldownTimer !== null) {
       clearTimeout(launchCooldownTimer);
@@ -190,8 +201,11 @@ export const useInstallStore = defineStore("install", () => {
     }
     try {
       applyStatus(await getInstallStatus());
+      showPersistedError();
     } catch (err) {
-      showFailure(err, "status");
+      if (!error.value) {
+        showFailure(err, "status");
+      }
     }
   }
 
@@ -207,7 +221,7 @@ export const useInstallStore = defineStore("install", () => {
     }
 
     checkingUpdate.value = true;
-    if (hasLicence.value !== false) {
+    if (hasLicence.value !== false && !lastError.value) {
       error.value = null;
     }
     try {
@@ -278,7 +292,18 @@ export const useInstallStore = defineStore("install", () => {
       return status.phase === "installed";
     } catch (err) {
       showFailure(err, "install");
-      phase.value = "failed";
+      try {
+        const status = await getInstallStatus();
+        applyStatus(status);
+        if (status.last_error) {
+          error.value = mapOperationError(
+            status.last_error,
+            status.phase === "installed" ? "update" : "install",
+          );
+        }
+      } catch {
+        phase.value = "failed";
+      }
       return false;
     } finally {
       loading.value = false;
@@ -357,6 +382,19 @@ export const useInstallStore = defineStore("install", () => {
     error.value = null;
   }
 
+  /** Leave `fehlerhaft` without deleting a partial download or an installed build. */
+  async function dismissError(): Promise<boolean> {
+    try {
+      const status = await clearInstallError();
+      applyStatus(status);
+      error.value = null;
+      return true;
+    } catch (err) {
+      showFailure(err, phase.value === "installed" ? "update" : "install");
+      return false;
+    }
+  }
+
   function formatBytes(value: number | null): string {
     if (value === null || Number.isNaN(value)) {
       return "–";
@@ -402,6 +440,7 @@ export const useInstallStore = defineStore("install", () => {
     uninstall,
     launch,
     clearError,
+    dismissError,
     formatBytes,
   };
 });

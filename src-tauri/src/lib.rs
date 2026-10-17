@@ -65,6 +65,7 @@ pub fn run() {
             install::commands::open_install_folder,
             install::commands::get_install_status,
             install::commands::start_install,
+            install::commands::clear_install_error,
             install::commands::uninstall_game,
             install::commands::launch_game,
         ])

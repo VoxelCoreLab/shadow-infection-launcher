@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInstallStatus = vi.fn();
 const startInstall = vi.fn();
+const clearInstallError = vi.fn();
 const uninstallGame = vi.fn();
 const launchGame = vi.fn();
 const listenInstallProgress = vi.fn();
@@ -17,6 +18,7 @@ const detectGameDownloadPlatform = vi.fn<(...args: unknown[]) => "macos">(
 vi.mock("@/api/install", () => ({
   getInstallStatus: (...args: unknown[]) => getInstallStatus(...args),
   startInstall: (...args: unknown[]) => startInstall(...args),
+  clearInstallError: (...args: unknown[]) => clearInstallError(...args),
   uninstallGame: (...args: unknown[]) => uninstallGame(...args),
   launchGame: (...args: unknown[]) => launchGame(...args),
   listenInstallProgress: (...args: unknown[]) => listenInstallProgress(...args),
@@ -51,6 +53,7 @@ import {
   INSTALL_FAILED_MESSAGE,
   LAUNCH_FAILED_MESSAGE,
   NETWORK_ERROR_MESSAGE,
+  UPDATE_CHECK_FAILED_MESSAGE,
 } from "@/lib/operation-errors";
 import { LAUNCH_COOLDOWN_MS, useInstallStore } from "./install";
 
@@ -313,6 +316,13 @@ describe("useInstallStore", () => {
   it("surfaces shop download errors", async () => {
     getMyLicence.mockResolvedValue({ data: true });
     fetchDownloadForPlatform.mockRejectedValue(new Error("shop down"));
+    getInstallStatus.mockResolvedValue({
+      phase: "not_installed",
+      install_path: "/games",
+      local_version: null,
+      last_error: null,
+      download: null,
+    });
 
     const store = useInstallStore();
     const ok = await store.startGameInstall();
@@ -321,8 +331,7 @@ describe("useInstallStore", () => {
     expect(startInstall).not.toHaveBeenCalled();
     expect(store.error).toBe(INSTALL_FAILED_MESSAGE);
     expect(store.error).not.toBe("shop down");
-    expect(store.lastError).toBe("shop down");
-    expect(store.phase).toBe("failed");
+    expect(store.phase).toBe("not_installed");
   });
 
   it("surfaces rust install failures", async () => {
@@ -332,14 +341,54 @@ describe("useInstallStore", () => {
       version: "1.0.0",
     });
     startInstall.mockRejectedValue(new Error("disk full"));
+    getInstallStatus.mockResolvedValue({
+      phase: "failed",
+      install_path: "/games",
+      local_version: null,
+      last_error: "disk full",
+      download: { version: "1.0.0", size: 100, bytes: 40 },
+    });
 
     const store = useInstallStore();
     const ok = await store.startGameInstall();
 
     expect(ok).toBe(false);
     expect(store.error).toBe(FILE_ERROR_MESSAGE);
+    expect(store.error).not.toBe("disk full");
     expect(store.lastError).toBe("disk full");
     expect(store.phase).toBe("failed");
+    expect(store.downloaded).toBe(40);
+  });
+
+  it("keeps the installed version when an update fails", async () => {
+    getMyLicence.mockResolvedValue({ data: true });
+    fetchDownloadForPlatform.mockResolvedValue({
+      url: "https://cdn.example/game.zip",
+      version: "2.0.0",
+    });
+    startInstall.mockRejectedValue(new Error("extract failed"));
+    getInstallStatus.mockResolvedValue({
+      phase: "installed",
+      install_path: "/games",
+      local_version: "1.0.0",
+      last_error: "extract failed",
+      download: null,
+    });
+
+    const store = useInstallStore();
+    store.phase = "installed";
+    store.localVersion = "1.0.0";
+    store.remoteVersion = "2.0.0";
+    store.updateAvailable = true;
+    const ok = await store.startGameInstall();
+
+    expect(ok).toBe(false);
+    expect(store.phase).toBe("installed");
+    expect(store.localVersion).toBe("1.0.0");
+    expect(store.error).toBe(FILE_ERROR_MESSAGE);
+    expect(store.error).not.toContain("extract failed");
+    expect(store.updateAvailable).toBe(true);
+    expect(store.canPlay).toBe(false);
   });
 
   it("maps network failures without showing the raw message", async () => {
@@ -347,14 +396,140 @@ describe("useInstallStore", () => {
     fetchDownloadForPlatform.mockRejectedValue(
       new Error("error sending request: connection refused"),
     );
+    getInstallStatus.mockResolvedValue({
+      phase: "not_installed",
+      install_path: "/games",
+      local_version: null,
+      last_error: null,
+      download: null,
+    });
 
     const store = useInstallStore();
     const ok = await store.startGameInstall();
 
     expect(ok).toBe(false);
     expect(store.error).toBe(NETWORK_ERROR_MESSAGE);
-    expect(store.lastError).toBe("error sending request: connection refused");
+    expect(store.error).not.toContain("connection refused");
+    expect(store.phase).toBe("not_installed");
+  });
+
+  it("keeps a persisted error while checking for updates", async () => {
+    getInstallStatus.mockResolvedValue({
+      phase: "failed",
+      install_path: "/games",
+      local_version: null,
+      last_error: "disk full",
+      download: null,
+    });
+    fetchLatestVersions.mockResolvedValue({
+      windows: "1.0.0",
+      macos: "1.0.0",
+      linux: "1.0.0",
+    });
+
+    const store = useInstallStore();
+    store.hasLicence = true;
+    await store.refreshStatus();
+    await store.checkForUpdate();
+
+    expect(store.error).toBe(FILE_ERROR_MESSAGE);
     expect(store.phase).toBe("failed");
+  });
+
+  it("keeps the current message when the status read fails", async () => {
+    getInstallStatus.mockRejectedValue(new Error("state file locked"));
+
+    const store = useInstallStore();
+    store.error = INSTALL_FAILED_MESSAGE;
+
+    await store.refreshStatus();
+
+    expect(store.error).toBe(INSTALL_FAILED_MESSAGE);
+    expect(store.error).not.toContain("locked");
+  });
+
+  it("shows a stored install error after refresh", async () => {
+    getInstallStatus.mockResolvedValue({
+      phase: "failed",
+      install_path: "/games",
+      local_version: null,
+      last_error: "disk full",
+      download: { version: "1.0.0", size: 100, bytes: 40 },
+    });
+
+    const store = useInstallStore();
+    await store.refreshStatus();
+
+    expect(store.phase).toBe("failed");
+    expect(store.error).toBe(FILE_ERROR_MESSAGE);
+    expect(store.error).not.toBe("disk full");
+    expect(store.downloaded).toBe(40);
+  });
+
+  it("maps a stored update error while the old version stays installed", async () => {
+    getInstallStatus.mockResolvedValue({
+      phase: "installed",
+      install_path: "/games",
+      local_version: "1.0.0",
+      last_error: "updater blew up",
+      download: null,
+    });
+
+    const store = useInstallStore();
+    await store.refreshStatus();
+
+    expect(store.phase).toBe("installed");
+    expect(store.localVersion).toBe("1.0.0");
+    expect(store.error).toBe(UPDATE_CHECK_FAILED_MESSAGE);
+    expect(store.error).not.toContain("blew up");
+  });
+
+  it("clears only the error and keeps a partial download", async () => {
+    clearInstallError.mockResolvedValue({
+      phase: "not_installed",
+      install_path: "/games",
+      local_version: null,
+      last_error: null,
+      download: { version: "1.0.0", size: 100, bytes: 40 },
+    });
+
+    const store = useInstallStore();
+    store.phase = "failed";
+    store.error = INSTALL_FAILED_MESSAGE;
+    store.lastError = "disk full";
+
+    const ok = await store.dismissError();
+
+    expect(ok).toBe(true);
+    expect(clearInstallError).toHaveBeenCalledOnce();
+    expect(store.phase).toBe("not_installed");
+    expect(store.error).toBeNull();
+    expect(store.lastError).toBeNull();
+    expect(store.downloaded).toBe(40);
+  });
+
+  it("dismisses an update error without dropping the installed version", async () => {
+    clearInstallError.mockResolvedValue({
+      phase: "installed",
+      install_path: "/games",
+      local_version: "1.0.0",
+      last_error: null,
+      download: null,
+    });
+
+    const store = useInstallStore();
+    store.phase = "installed";
+    store.localVersion = "1.0.0";
+    store.error = FILE_ERROR_MESSAGE;
+    store.lastError = "extract failed";
+
+    const ok = await store.dismissError();
+
+    expect(ok).toBe(true);
+    expect(store.phase).toBe("installed");
+    expect(store.localVersion).toBe("1.0.0");
+    expect(store.error).toBeNull();
+    expect(store.lastError).toBeNull();
   });
 
   it("rejects a second start while downloading", async () => {

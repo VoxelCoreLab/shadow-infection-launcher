@@ -18,6 +18,7 @@ const {
   total,
   progressPhase,
   error,
+  lastError,
   localVersion,
   remoteVersion,
   installPath,
@@ -180,10 +181,18 @@ const progressPercentLabel = computed(
       <div class="space-y-4">
         <div
           v-if="error"
-          class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 font-body text-sm text-red-400"
+          class="flex items-start justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 font-body text-sm text-red-400"
           role="alert"
         >
-          {{ error }}
+          <p>{{ error }}</p>
+          <button
+            v-if="phase === 'installed' && lastError"
+            type="button"
+            class="shrink-0 text-xs font-medium text-red-300 underline decoration-red-300/50 underline-offset-2 hover:text-red-200"
+            @click="install.dismissError()"
+          >
+            Dismiss
+          </button>
         </div>
 
         <div
@@ -235,14 +244,24 @@ const progressPercentLabel = computed(
           A newer build is ready. Choose Update before playing.
         </p>
 
-        <button
-          type="button"
-          class="play-action disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="!primaryEnabled"
-          @click="onPrimaryClick"
-        >
-          {{ primaryLabel }}
-        </button>
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="play-action disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="!primaryEnabled"
+            @click="onPrimaryClick"
+          >
+            {{ primaryLabel }}
+          </button>
+          <button
+            v-if="phase === 'failed' && !showProgress"
+            type="button"
+            class="font-body text-sm text-slate-400 underline decoration-slate-500/60 underline-offset-2 hover:text-slate-200"
+            @click="install.dismissError()"
+          >
+            Cancel
+          </button>
+        </div>
 
         <p
           v-if="installPath"
