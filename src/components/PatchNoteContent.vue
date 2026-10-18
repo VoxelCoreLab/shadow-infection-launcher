@@ -31,6 +31,8 @@ const html = computed(() => renderMarkdown(props.content));
   font-size: 0.875rem;
   line-height: 1.6;
   color: rgb(203 213 225);
+  user-select: text;
+  -webkit-user-select: text;
   opacity: 0;
   transform: translateY(-0.35rem);
   transition:

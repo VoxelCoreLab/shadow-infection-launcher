@@ -52,3 +52,34 @@ textarea {
   user-select: text;
   -webkit-user-select: text;
 }
+
+::selection {
+  background: rgba(253, 199, 135, 0.35);
+  color: #fff;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(253, 199, 135, 0.45) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(253, 199, 135, 0.45);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+button:focus-visible:not(.primary-button),
+a:focus-visible,
+[role="switch"]:focus-visible {
+  outline: 2px solid var(--color-launcher-gold);
+  outline-offset: 2px;
+}

@@ -197,6 +197,10 @@ async function openWebsitePath(path: string) {
   text-transform: uppercase;
   color: #e2e8f0;
   cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
 }
 .google-submit:hover:not(:disabled) {
   border-color: var(--color-launcher-gold-dim);

@@ -73,18 +73,15 @@ const statusLabel = computed(() => {
 });
 
 const statusColor = computed(() => {
-  if (launching.value) {
-    return "text-amber-400";
-  }
-  if (updateAvailable.value && !showProgress.value) {
-    return "text-amber-400";
+  if (launching.value || (updateAvailable.value && !showProgress.value)) {
+    return "text-launcher-gold-bright";
   }
   switch (phase.value) {
     case "installed":
-      return "text-emerald-400";
+      return "text-launcher-gold";
     case "downloading":
     case "extracting":
-      return "text-amber-400";
+      return "text-launcher-gold-bright";
     default:
       return "text-slate-400";
   }
@@ -223,7 +220,7 @@ const progressPercentLabel = computed(
           </span>
           <span
             v-if="updateAvailable && remoteVersion"
-            class="text-xs text-amber-500/80"
+            class="text-xs text-launcher-gold-dim"
           >
             → v{{ remoteVersion }}
           </span>
@@ -231,7 +228,7 @@ const progressPercentLabel = computed(
 
         <p
           v-if="updateAvailable && !showProgress && !launching"
-          class="font-body text-xs text-amber-200/80"
+          class="font-body text-xs text-launcher-gold-dim"
         >
           A newer build is ready. Choose Update before playing.
         </p>
