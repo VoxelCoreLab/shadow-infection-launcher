@@ -233,7 +233,9 @@ const progressPercentLabel = computed(
         </div>
 
         <p
-          v-if="updateAvailable && !showProgress && !launching && !offerPurchase"
+          v-if="
+            updateAvailable && !showProgress && !launching && !offerPurchase
+          "
           class="font-body text-xs text-launcher-gold-dim"
         >
           A newer build is ready. Choose Update before playing.

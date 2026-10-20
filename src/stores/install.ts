@@ -159,10 +159,7 @@ export const useInstallStore = defineStore("install", () => {
     phase.value = nextPhase === "extract" ? "extracting" : "downloading";
     downloaded.value = update.downloaded ?? 0;
     total.value = update.total ?? null;
-    if (
-      typeof update.percent === "number" &&
-      Number.isFinite(update.percent)
-    ) {
+    if (typeof update.percent === "number" && Number.isFinite(update.percent)) {
       percent.value = update.percent;
     } else if (update.total != null && update.total > 0) {
       percent.value = (update.downloaded / update.total) * 100;
