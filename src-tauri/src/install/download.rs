@@ -124,6 +124,9 @@ impl HttpDownloader for ReqwestDownloader {
             });
         };
 
+        // Start this phase at the current offset (0 on a fresh download).
+        emit(downloaded);
+
         loop {
             let n = response.read(&mut buffer).map_err(|e| e.to_string())?;
             if n == 0 {

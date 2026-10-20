@@ -150,11 +150,12 @@ async function onPrimaryClick() {
 }
 
 const progressPercent = computed(() => {
-  const raw = Math.min(Math.max(percent.value ?? 0, 0), 100);
-  if (showProgress.value && raw < 2) {
-    return 2;
+  let raw = percent.value;
+  if (raw == null || Number.isNaN(raw)) {
+    const size = total.value;
+    raw = size != null && size > 0 ? (downloaded.value / size) * 100 : 0;
   }
-  return raw;
+  return Math.min(Math.max(raw, 0), 100);
 });
 
 const progressLabel = computed(() => {
@@ -165,7 +166,7 @@ const progressLabel = computed(() => {
 });
 
 const progressPercentLabel = computed(
-  () => `${(percent.value ?? 0).toFixed(0)}%`,
+  () => `${progressPercent.value.toFixed(0)}%`,
 );
 </script>
 
@@ -203,10 +204,11 @@ const progressPercentLabel = computed(
             <span>{{ progressPercentLabel }}</span>
           </div>
           <div
-            class="h-1.5 w-full overflow-hidden rounded-full border border-launcher-border bg-black/40"
+            class="relative h-1.5 w-full overflow-hidden rounded-full border border-launcher-border bg-black/40"
           >
             <div
-              class="progress-bar-inner h-full rounded-full transition-[width] duration-200"
+              :key="progressPhase"
+              class="progress-bar-inner absolute inset-y-0 left-0"
               :style="{ width: `${progressPercent}%` }"
             />
           </div>

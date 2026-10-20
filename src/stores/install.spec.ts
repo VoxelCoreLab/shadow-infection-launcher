@@ -263,6 +263,52 @@ describe("useInstallStore", () => {
     expect(store.isBusy).toBe(true);
   });
 
+  it("restarts progress at 0 when extraction starts", async () => {
+    listenInstallProgress.mockImplementation(async () => {
+      return () => undefined;
+    });
+    getMyLicence.mockResolvedValue({ data: true });
+    fetchDownloadForPlatform.mockResolvedValue({
+      url: "https://cdn.example/game.zip",
+      version: "1.0.0",
+    });
+    startInstall.mockResolvedValue({
+      phase: "installed",
+      install_path: "/game",
+      local_version: "1.0.0",
+      last_error: null,
+      download: null,
+    });
+
+    const store = useInstallStore();
+    await store.startGameInstall();
+    const listenCb = listenInstallProgress.mock.calls[0]?.[0] as
+      | ((u: {
+          downloaded: number;
+          total: number | null;
+          percent: number | null;
+          phase: "download" | "extract";
+        }) => void)
+      | undefined;
+
+    listenCb?.({
+      downloaded: 100,
+      total: 100,
+      percent: 100,
+      phase: "download",
+    });
+    expect(store.percent).toBe(100);
+    expect(store.progressPhase).toBe("download");
+
+    listenCb?.({ downloaded: 0, total: 80, percent: 0, phase: "extract" });
+    expect(store.phase).toBe("extracting");
+    expect(store.progressPhase).toBe("extract");
+    expect(store.percent).toBe(0);
+
+    listenCb?.({ downloaded: 40, total: 80, percent: null, phase: "extract" });
+    expect(store.percent).toBe(50);
+  });
+
   it("blocks download without licence", async () => {
     getMyLicence.mockResolvedValue({ data: false });
 

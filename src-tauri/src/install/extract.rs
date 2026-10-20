@@ -173,21 +173,28 @@ fn extract_zip_with_limits(
         u64::MAX
     };
 
-    let emit = |extracted: u64| {
+    let emit = |extracted: u64, entries_done: usize| {
         let percent = if total_uncompressed > 0 {
-            Some((extracted as f64 / total_uncompressed as f64 * 100.0).min(100.0))
+            (extracted as f64 / total_uncompressed as f64 * 100.0).min(100.0)
+        } else if entry_count == 0 {
+            100.0
         } else {
-            Some(100.0)
+            (entries_done as f64 / entry_count as f64 * 100.0).min(100.0)
         };
         progress.on_progress(ProgressUpdate {
             downloaded: extracted,
-            total: Some(total_uncompressed),
-            percent,
+            total: Some(if total_uncompressed > 0 {
+                total_uncompressed
+            } else {
+                entry_count as u64
+            }),
+            percent: Some(percent),
             phase: ProgressPhase::Extract,
         });
     };
 
-    emit(0);
+    // Own 0–100% cycle. Download progress must not carry over.
+    emit(0, 0);
 
     let mut extracted: u64 = 0;
     let mut last_reported: u64 = 0;
@@ -219,7 +226,7 @@ fn extract_zip_with_limits(
                 }
                 outfile.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
                 if extracted - last_reported >= report_interval {
-                    emit(extracted);
+                    emit(extracted, i);
                     last_reported = extracted;
                 }
             }
@@ -227,9 +234,13 @@ fn extract_zip_with_limits(
             drop(outfile);
             apply_unix_mode(&out_path, entry.unix_mode());
         }
+        if total_uncompressed == 0 {
+            emit(extracted, i + 1);
+            last_reported = extracted;
+        }
     }
 
-    emit(total_uncompressed.max(extracted));
+    emit(total_uncompressed.max(extracted), entry_count);
     Ok(())
 }
 
@@ -320,7 +331,8 @@ mod tests {
         let root = temp_dir("progress");
         let archive = root.join("game.zip");
         let install = root.join("game");
-        write_zip(&archive, &[("a.txt", b"aaaa"), ("b.txt", b"bbbb")]);
+        let payload = vec![b'a'; 256 * 1024];
+        write_zip(&archive, &[("a.bin", &payload), ("b.bin", &payload)]);
         let sink = RecordingSink {
             updates: Mutex::new(Vec::new()),
         };
@@ -330,12 +342,28 @@ mod tests {
             .unwrap();
 
         let updates = sink.updates.lock().unwrap();
-        assert!(!updates.is_empty());
+        let percents: Vec<f64> = updates.iter().filter_map(|u| u.percent).collect();
         assert!(updates.iter().all(|u| u.phase == ProgressPhase::Extract));
-        assert!(updates
-            .last()
-            .and_then(|u| u.percent)
-            .is_some_and(|p| (p - 100.0).abs() < f64::EPSILON));
+        assert!(
+            percents.first().is_some_and(|p| *p == 0.0),
+            "extract must start at 0%, got {percents:?}"
+        );
+        assert!(
+            percents.iter().any(|p| *p > 0.0 && *p < 100.0),
+            "extract must move between 0 and 100, got {percents:?}"
+        );
+        assert!(
+            percents
+                .last()
+                .is_some_and(|p| (*p - 100.0).abs() < f64::EPSILON),
+            "extract must end at 100%, got {percents:?}"
+        );
+        for pair in percents.windows(2) {
+            assert!(
+                pair[1] + f64::EPSILON >= pair[0],
+                "extract percent must not go backwards: {percents:?}"
+            );
+        }
         let _ = fs::remove_dir_all(root);
     }
 
