@@ -1,6 +1,6 @@
 [package]
 name = "shadow-infection-launcher"
-version = "0.1.0"
+version = "1.0.0"
 description = "Shadow Infection Launcher"
 authors = ["Voxel Core Lab"]
 edition = "2021"
