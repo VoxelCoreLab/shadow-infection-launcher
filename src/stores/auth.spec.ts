@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionError } from "@/lib/session";
 
 const signInWithEmailAndPassword = vi.fn();
@@ -73,6 +73,12 @@ type GoogleHandler = (event: { payload: string }) => void;
 
 describe("useAuthStore", () => {
   const googleHandlers = new Map<string, GoogleHandler>();
+  let errorLog: ReturnType<typeof vi.spyOn> | undefined;
+
+  afterEach(() => {
+    errorLog?.mockRestore();
+    errorLog = undefined;
+  });
 
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -425,6 +431,7 @@ describe("useAuthStore", () => {
   });
 
   it("does not store a refresh token when Google sign-in fails", async () => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     invoke.mockImplementation(async (command: string) => {
       if (command === "start_google_login") {
         googleHandlers.get("google-login-error")?.({
@@ -441,6 +448,10 @@ describe("useAuthStore", () => {
     );
 
     expect(ok).toBe(false);
+    expect(errorLog).toHaveBeenCalledWith(
+      "Google sign-in failed",
+      expect.any(Error),
+    );
     expect(auth.error).toBe("Google sign-in failed. Please try again.");
     expect(auth.isLoggedIn).toBe(false);
     expect(invoke).not.toHaveBeenCalledWith(
@@ -451,6 +462,7 @@ describe("useAuthStore", () => {
   });
 
   it("shows the rate limit when Google sign-in is attempted too often", async () => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     invoke.mockRejectedValue("too_many");
 
     const auth = useAuthStore();
@@ -461,12 +473,14 @@ describe("useAuthStore", () => {
     );
 
     expect(ok).toBe(false);
+    expect(errorLog).toHaveBeenCalledWith("Google sign-in failed", "too_many");
     expect(auth.error).toBe(
       "Too many sign-in attempts. Wait a minute and try again.",
     );
   });
 
   it("times out when the deep link never arrives", async () => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.useFakeTimers();
     try {
       const auth = useAuthStore();
@@ -478,6 +492,10 @@ describe("useAuthStore", () => {
       await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
 
       expect(await pending).toBe(false);
+      expect(errorLog).toHaveBeenCalledWith(
+        "Google sign-in failed",
+        expect.any(Error),
+      );
       expect(auth.error).toBe("Google sign-in timed out. Please try again.");
       expect(signInWithCredential).not.toHaveBeenCalled();
     } finally {
