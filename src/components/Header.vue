@@ -2,6 +2,7 @@
 import { RouterLink, useRouter } from "vue-router";
 import { useUiStore } from "@/stores/ui";
 import { useAuthStore } from "@/stores/auth";
+import { useInstallStore } from "@/stores/install";
 import IconLogout from "@/components/icons/IconLogout.vue";
 import IconSettings from "@/components/icons/IconSettings.vue";
 import WindowControls from "@/components/WindowControls.vue";
@@ -9,11 +10,13 @@ import appIcon from "../../src-tauri/icons/icon.png";
 
 const ui = useUiStore();
 const auth = useAuthStore();
+const install = useInstallStore();
 const router = useRouter();
 
 async function handleLogout() {
   const ok = await auth.logout();
   if (ok) {
+    install.clearLicence();
     await router.push({ name: "login" });
   }
 }

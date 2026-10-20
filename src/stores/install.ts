@@ -80,9 +80,10 @@ export const useInstallStore = defineStore("install", () => {
     () =>
       canStartInstall.value && (!isInstalled.value || updateAvailable.value),
   );
-  /** Play when installed and up to date (no install/update/launch in progress). */
+  /** Play when this account has a licence, and the build is installed and up to date. */
   const canPlay = computed(
     () =>
+      hasLicence.value === true &&
       isInstalled.value &&
       !updateAvailable.value &&
       !isBusy.value &&
@@ -174,6 +175,14 @@ export const useInstallStore = defineStore("install", () => {
       error.value = LICENCE_MISSING_MESSAGE;
       return;
     }
+    if (error.value === LICENCE_MISSING_MESSAGE) {
+      error.value = null;
+    }
+  }
+
+  /** Drop the previous account's licence so the next login cannot inherit Play. */
+  function clearLicence() {
+    hasLicence.value = null;
     if (error.value === LICENCE_MISSING_MESSAGE) {
       error.value = null;
     }
@@ -358,6 +367,10 @@ export const useInstallStore = defineStore("install", () => {
       error.value = UPDATE_BEFORE_LAUNCH_MESSAGE;
       return false;
     }
+    if (hasLicence.value === false) {
+      error.value = LICENCE_MISSING_MESSAGE;
+      return false;
+    }
 
     error.value = null;
     clearLaunchCooldown();
@@ -435,6 +448,7 @@ export const useInstallStore = defineStore("install", () => {
     canUninstall,
     refreshStatus,
     refreshLicence,
+    clearLicence,
     checkForUpdate,
     startGameInstall,
     uninstall,

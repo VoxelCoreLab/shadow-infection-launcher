@@ -46,14 +46,18 @@ const showProgress = computed(
 );
 
 const offerPurchase = computed(
-  () => hasLicence.value === false && !canPlay.value && !showProgress.value,
+  () => hasLicence.value === false && !showProgress.value,
 );
 
 const statusLabel = computed(() => {
   if (launching.value) {
     return "Starting game";
   }
-  if (updateAvailable.value && !showProgress.value) {
+  if (
+    updateAvailable.value &&
+    !showProgress.value &&
+    hasLicence.value !== false
+  ) {
     return "Update available";
   }
   switch (phase.value) {
@@ -64,7 +68,7 @@ const statusLabel = computed(() => {
     case "extracting":
       return "Extracting";
     case "installed":
-      return "Ready to play";
+      return hasLicence.value === false ? "" : "Ready to play";
     case "failed":
       return "";
     default:
@@ -131,12 +135,12 @@ async function openProductPage() {
 }
 
 async function onPrimaryClick() {
-  if (canPlay.value) {
-    await install.launch();
-    return;
-  }
   if (hasLicence.value === false) {
     await openProductPage();
+    return;
+  }
+  if (canPlay.value) {
+    await install.launch();
     return;
   }
   const started = await install.startGameInstall();
@@ -227,7 +231,7 @@ const progressPercentLabel = computed(
         </div>
 
         <p
-          v-if="updateAvailable && !showProgress && !launching"
+          v-if="updateAvailable && !showProgress && !launching && !offerPurchase"
           class="font-body text-xs text-launcher-gold-dim"
         >
           A newer build is ready. Choose Update before playing.

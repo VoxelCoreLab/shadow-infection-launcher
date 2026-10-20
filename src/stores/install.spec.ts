@@ -740,6 +740,7 @@ describe("useInstallStore", () => {
     store.localVersion = "1.0.0";
     store.remoteVersion = "1.0.0";
     store.updateAvailable = false;
+    store.hasLicence = true;
 
     expect(store.canPlay).toBe(true);
     const ok = await store.launch();
@@ -764,6 +765,7 @@ describe("useInstallStore", () => {
     store.phase = "installed";
     store.localVersion = "1.0.0";
     store.updateAvailable = false;
+    store.hasLicence = true;
 
     expect(await store.launch()).toBe(true);
     expect(await store.launch()).toBe(false);
@@ -799,6 +801,22 @@ describe("useInstallStore", () => {
     expect(store.error).toMatch(/installation is running/i);
   });
 
+  it("blocks launch when the account has no licence", async () => {
+    const store = useInstallStore();
+    store.phase = "installed";
+    store.localVersion = "1.0.0";
+    store.remoteVersion = "1.0.0";
+    store.updateAvailable = false;
+    store.hasLicence = false;
+
+    expect(store.canPlay).toBe(false);
+    const ok = await store.launch();
+
+    expect(ok).toBe(false);
+    expect(launchGame).not.toHaveBeenCalled();
+    expect(store.error).toMatch(/licence/i);
+  });
+
   it("blocks launch when update is available", async () => {
     const store = useInstallStore();
     store.phase = "installed";
@@ -820,6 +838,7 @@ describe("useInstallStore", () => {
     const store = useInstallStore();
     store.phase = "installed";
     store.localVersion = "1.0.0";
+    store.hasLicence = true;
 
     const ok = await store.launch();
 
